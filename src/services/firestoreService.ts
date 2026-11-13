@@ -14,8 +14,18 @@ import {
   Timestamp,
   type Unsubscribe
 } from 'firebase/firestore';
-import { signInWithPopup, signOut, type User as FirebaseAuthUser } from 'firebase/auth';
-import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../firebase';
+import {
+  createUserWithEmailAndPassword,
+  deleteUser as deleteFirebaseAuthUser,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  updatePassword,
+  type User as FirebaseAuthUser
+} from 'firebase/auth';
+import { auth, db, getSecondaryAuth, googleProvider, handleFirestoreError, OperationType } from '../firebase';
 import type {
   User,
   Prediction,
@@ -41,6 +51,8 @@ function toIso(value: unknown): string {
   return new Date().toISOString();
 }
 
+export const SYNTHETIC_USER_DOMAIN = 'users.apexpredict.app';
+
 export function sanitizeId(raw: string): string {
   const cleaned = raw.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
   return cleaned.slice(0, 128) || `id_${Date.now()}`;
@@ -48,6 +60,15 @@ export function sanitizeId(raw: string): string {
 
 export function normalizeUsername(raw: string): string {
   return raw.trim().replace(/^@+/, '');
+}
+
+export function usernameToInternalEmail(username: string): string {
+  const clean = sanitizeId(normalizeUsername(username).toLowerCase());
+  return `${clean}@${SYNTHETIC_USER_DOMAIN}`;
+}
+
+export function deriveFirebasePassword(rawPassword: string): string {
+  return `ApexKey#${rawPassword.trim()}`;
 }
 
 function mapUserDoc(id: string, data: Record<string, unknown>): User {
@@ -178,6 +199,15 @@ function formatAuthError(err: unknown): string {
   const code = (err as { code?: string })?.code || '';
   if (code === 'auth/popup-closed-by-user') return 'Google sign-in popup was closed. Please try again.';
   if (code === 'auth/popup-blocked') return 'Popup was blocked by your browser. Please allow popups and try again.';
+  if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+    return 'Username/Password login needs Email/Password enabled once in Firebase Console → Authentication → Sign-in method.';
+  }
+  if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password') {
+    return 'Invalid username or password';
+  }
+  if (code === 'auth/too-many-requests') {
+    return 'Too many login attempts. Please wait a minute and try again.';
+  }
   if (code === 'auth/unauthorized-domain') {
     return `This domain (${window.location.hostname}) must be added under Firebase Console → Authentication → Settings → Authorized domains.`;
   }
@@ -277,27 +307,6 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
     updatedAt: serverTimestamp()
   });
 
-  batch.set(doc(db, 'users', 'usr_alex'), {
-    id: 'usr_alex',
-    username: 'alex_sports',
-    fullName: 'Alex Morgan',
-    coins: 2450,
-    status: 'active',
-    ownerUid: null,
-    notes: 'Demo player account',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
-
-  batch.set(doc(db, 'account_claims', 'alex_sports'), {
-    userId: 'usr_alex',
-    username: 'alex_sports',
-    accessCode: 'user123',
-    claimedByUid: null,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
-
   try {
     await batch.commit();
   } catch (err) {
@@ -335,88 +344,27 @@ export async function signInAdminWithGoogle(): Promise<{ success: boolean; error
   }
 }
 
-export async function signInUserWithGoogleOrClaim(
-  usernameInput?: string,
-  passwordInput?: string
+export async function signInUserWithCredentials(
+  usernameInput: string,
+  passwordInput: string
 ): Promise<{ success: boolean; error?: string; userId?: string }> {
+  const cleanUsername = normalizeUsername(usernameInput || '');
+  const cleanPassword = (passwordInput || '').trim();
+
+  if (cleanUsername.length < 2 || !/^[a-zA-Z0-9_-]+$/.test(cleanUsername)) {
+    return { success: false, error: 'Invalid username or password' };
+  }
+  if (cleanPassword.length < 4) {
+    return { success: false, error: 'Invalid username or password' };
+  }
+
   try {
-    let authUser = auth.currentUser;
-    if (!authUser || !authUser.emailVerified) {
-      const cred = await signInWithPopup(auth, googleProvider);
-      authUser = cred.user;
-    }
+    const internalEmail = usernameToInternalEmail(cleanUsername);
+    const derivedPassword = deriveFirebasePassword(cleanPassword);
+    const cred = await signInWithEmailAndPassword(auth, internalEmail, derivedPassword);
+    const authUid = cred.user.uid;
 
-    const cleanUsername = normalizeUsername(usernameInput || '');
-    const cleanPassword = (passwordInput || '').trim();
-
-    if (cleanUsername) {
-      const claimKey = sanitizeId(cleanUsername.toLowerCase());
-      const claimRef = doc(db, 'account_claims', claimKey);
-      let claimSnap;
-      try {
-        claimSnap = await getDoc(claimRef);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, `account_claims/${claimKey}`);
-      }
-
-      if (!claimSnap.exists()) {
-        return { success: false, error: 'Invalid username or password' };
-      }
-
-      const claimData = claimSnap.data();
-      if (String(claimData.accessCode || '').trim() !== cleanPassword) {
-        return { success: false, error: 'Invalid username or password' };
-      }
-
-      if (claimData.claimedByUid && claimData.claimedByUid !== authUser.uid) {
-        return { success: false, error: 'This username is already linked to another Google account.' };
-      }
-
-      const targetUserId = String(claimData.userId);
-      const userRef = doc(db, 'users', targetUserId);
-      const nowIso = new Date().toISOString();
-
-      if (!claimData.claimedByUid) {
-        const batch = writeBatch(db);
-        batch.update(claimRef, {
-          claimedByUid: authUser.uid,
-          updatedAt: serverTimestamp()
-        });
-        batch.update(userRef, {
-          ownerUid: authUser.uid,
-          lastLogin: nowIso,
-          updatedAt: serverTimestamp()
-        });
-        try {
-          await batch.commit();
-        } catch (err) {
-          handleFirestoreError(err, OperationType.UPDATE, `users/${targetUserId}`);
-        }
-      } else {
-        let userSnap;
-        try {
-          userSnap = await getDoc(userRef);
-        } catch (err) {
-          handleFirestoreError(err, OperationType.GET, `users/${targetUserId}`);
-        }
-        if (!userSnap.exists()) {
-          return { success: false, error: 'Account no longer exists' };
-        }
-        if (userSnap.data().status === 'suspended') {
-          return { success: false, error: 'This account has been suspended by the administrator' };
-        }
-        try {
-          await updateDoc(userRef, { lastLogin: nowIso, updatedAt: serverTimestamp() });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.UPDATE, `users/${targetUserId}`);
-        }
-      }
-
-      return { success: true, userId: targetUserId };
-    }
-
-    // 1-tap Google login: find existing profile by ownerUid or create one
-    const usersQ = query(collection(db, 'users'), where('ownerUid', '==', authUser.uid), limit(1));
+    const usersQ = query(collection(db, 'users'), where('ownerUid', '==', authUid), limit(1));
     let usersSnap;
     try {
       usersSnap = await getDocs(usersQ);
@@ -424,47 +372,27 @@ export async function signInUserWithGoogleOrClaim(
       handleFirestoreError(err, OperationType.LIST, 'users');
     }
 
-    const nowIso = new Date().toISOString();
-    if (!usersSnap.empty) {
-      const existingDoc = usersSnap.docs[0];
-      if (existingDoc.data().status === 'suspended') {
-        return { success: false, error: 'This account has been suspended by the administrator' };
-      }
-      try {
-        await updateDoc(existingDoc.ref, { lastLogin: nowIso, updatedAt: serverTimestamp() });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${existingDoc.id}`);
-      }
-      return { success: true, userId: existingDoc.id };
+    if (usersSnap.empty) {
+      await signOut(auth);
+      return { success: false, error: 'Account profile not found. Please contact administrator.' };
     }
 
-    const rawHandle = (authUser.email?.split('@')[0] || authUser.displayName || 'player').toLowerCase();
-    const safeUsername = sanitizeId(rawHandle).slice(0, 28);
-    const finalUsername = safeUsername.length >= 2 ? safeUsername : `player_${authUser.uid.slice(0, 6)}`;
+    const existingDoc = usersSnap.docs[0];
+    if (existingDoc.data().status === 'suspended') {
+      await signOut(auth);
+      return { success: false, error: 'This account has been suspended by the administrator' };
+    }
 
-    const batch = writeBatch(db);
-    batch.set(doc(db, 'users', authUser.uid), {
-      id: authUser.uid,
-      username: finalUsername,
-      fullName: (authUser.displayName || finalUsername).slice(0, 100),
-      coins: 0,
-      status: 'active',
-      ownerUid: authUser.uid,
-      lastLogin: nowIso,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    batch.set(doc(db, 'users', authUser.uid, 'private', 'info'), {
-      ownerUid: authUser.uid,
-      email: (authUser.email || '').slice(0, 160),
-      updatedAt: serverTimestamp()
-    });
     try {
-      await batch.commit();
+      await updateDoc(existingDoc.ref, {
+        lastLogin: new Date().toISOString(),
+        updatedAt: serverTimestamp()
+      });
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${authUser.uid}`);
+      handleFirestoreError(err, OperationType.UPDATE, `users/${existingDoc.id}`);
     }
-    return { success: true, userId: authUser.uid };
+
+    return { success: true, userId: existingDoc.id };
   } catch (err) {
     return { success: false, error: formatAuthError(err) };
   }
@@ -924,6 +852,35 @@ export async function fsCreateUser(data: {
     return { success: false, error: 'Username already exists' };
   }
 
+  const secondaryAuth = getSecondaryAuth();
+  const internalEmail = usernameToInternalEmail(cleanUsername);
+  const derivedPassword = deriveFirebasePassword(cleanPassword);
+  let createdUid = '';
+
+  try {
+    try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, internalEmail, derivedPassword);
+      createdUid = cred.user.uid;
+    } catch (authErr) {
+      const code = (authErr as { code?: string })?.code || '';
+      if (code === 'auth/email-already-in-use') {
+        try {
+          const signCred = await signInWithEmailAndPassword(secondaryAuth, internalEmail, derivedPassword);
+          createdUid = signCred.user.uid;
+        } catch {
+          return {
+            success: false,
+            error: 'This username already exists in authentication. Please choose another username.'
+          };
+        }
+      } else {
+        return { success: false, error: formatAuthError(authErr) };
+      }
+    }
+  } finally {
+    await signOut(secondaryAuth).catch(() => {});
+  }
+
   const userId = `usr_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   const coins = Math.max(0, Number(data.initialCoins) || 0);
   const batch = writeBatch(db);
@@ -934,7 +891,7 @@ export async function fsCreateUser(data: {
     fullName: cleanFullName.slice(0, 100),
     coins,
     status: 'active',
-    ownerUid: null,
+    ownerUid: createdUid,
     notes: data.notes ? data.notes.trim().slice(0, 500) : '',
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
@@ -944,14 +901,14 @@ export async function fsCreateUser(data: {
     userId,
     username: cleanUsername,
     accessCode: cleanPassword.slice(0, 64),
-    claimedByUid: null,
+    claimedByUid: createdUid,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
 
   if (data.email || data.phone) {
     batch.set(doc(db, 'users', userId, 'private', 'info'), {
-      ownerUid: null,
+      ownerUid: createdUid,
       email: data.email ? data.email.trim().slice(0, 160) : '',
       phone: data.phone ? data.phone.trim().slice(0, 40) : '',
       updatedAt: serverTimestamp()
@@ -1022,9 +979,73 @@ export async function fsResetUserPassword(user: User, newPass: string): Promise<
   const clean = newPass.trim();
   if (clean.length < 4) return { success: false, error: 'Password must be at least 4 characters' };
   const claimKey = sanitizeId(user.username.toLowerCase());
+  const claimRef = doc(db, 'account_claims', claimKey);
+
+  let claimSnap;
+  try {
+    claimSnap = await getDoc(claimRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, `account_claims/${claimKey}`);
+  }
+
+  if (claimSnap.exists()) {
+    const oldAccessCode = String(claimSnap.data().accessCode || '').trim();
+    if (oldAccessCode) {
+      const secondaryAuth = getSecondaryAuth();
+      try {
+        const cred = await signInWithEmailAndPassword(
+          secondaryAuth,
+          usernameToInternalEmail(user.username),
+          deriveFirebasePassword(oldAccessCode)
+        );
+        await updatePassword(cred.user, deriveFirebasePassword(clean));
+      } catch (err) {
+        return { success: false, error: formatAuthError(err) };
+      } finally {
+        await signOut(secondaryAuth).catch(() => {});
+      }
+    }
+  }
+
+  try {
+    await updateDoc(claimRef, {
+      accessCode: clean.slice(0, 64),
+      updatedAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `account_claims/${claimKey}`);
+  }
+}
+
+export async function fsChangeOwnPassword(
+  user: User,
+  oldPass: string,
+  newPass: string
+): Promise<{ success: boolean; error?: string }> {
+  const cleanOld = oldPass.trim();
+  const cleanNew = newPass.trim();
+  if (cleanNew.length < 4) return { success: false, error: 'New password must be at least 4 characters' };
+  if (!auth.currentUser || !auth.currentUser.email) {
+    return { success: false, error: 'Not signed in' };
+  }
+
+  try {
+    const credential = EmailAuthProvider.credential(auth.currentUser.email, deriveFirebasePassword(cleanOld));
+    await reauthenticateWithCredential(auth.currentUser, credential);
+    await updatePassword(auth.currentUser, deriveFirebasePassword(cleanNew));
+  } catch (err) {
+    const code = (err as { code?: string })?.code || '';
+    if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+      return { success: false, error: 'Current password is incorrect' };
+    }
+    return { success: false, error: formatAuthError(err) };
+  }
+
+  const claimKey = sanitizeId(user.username.toLowerCase());
   try {
     await updateDoc(doc(db, 'account_claims', claimKey), {
-      accessCode: clean.slice(0, 64),
+      accessCode: cleanNew.slice(0, 64),
       updatedAt: serverTimestamp()
     });
     return { success: true };
@@ -1035,9 +1056,35 @@ export async function fsResetUserPassword(user: User, newPass: string): Promise<
 
 export async function fsDeleteUser(user: User): Promise<{ success: boolean; error?: string }> {
   const claimKey = sanitizeId(user.username.toLowerCase());
+  const claimRef = doc(db, 'account_claims', claimKey);
+
+  try {
+    const claimSnap = await getDoc(claimRef);
+    if (claimSnap.exists()) {
+      const accessCode = String(claimSnap.data().accessCode || '').trim();
+      if (accessCode) {
+        const secondaryAuth = getSecondaryAuth();
+        try {
+          const cred = await signInWithEmailAndPassword(
+            secondaryAuth,
+            usernameToInternalEmail(user.username),
+            deriveFirebasePassword(accessCode)
+          );
+          await deleteFirebaseAuthUser(cred.user);
+        } catch {
+          // Ignore if auth account was already deleted
+        } finally {
+          await signOut(secondaryAuth).catch(() => {});
+        }
+      }
+    }
+  } catch {
+    // Proceed with Firestore deletion even if lookup fails
+  }
+
   const batch = writeBatch(db);
   batch.delete(doc(db, 'users', user.id));
-  batch.delete(doc(db, 'account_claims', claimKey));
+  batch.delete(claimRef);
   try {
     await batch.commit();
     return { success: true };

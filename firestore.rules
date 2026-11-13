@@ -23,12 +23,15 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+    function isAuthenticatedAppUser() {
+      return isSignedIn() && (
+        request.auth.token.email_verified == true ||
+        (request.auth.token.email is string && request.auth.token.email.matches('^[a-z0-9_\\-]+@users\\.apexpredict\\.app$'))
+      );
     }
 
     function isAdmin() {
-      return isVerifiedUser() && (
+      return isSignedIn() && request.auth.token.email_verified == true && (
         request.auth.token.email == 'vgdxfgf@gmail.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
@@ -223,14 +226,14 @@ service cloud.firestore {
     }
 
     match /admins/{uid} {
-      allow get: if isValidId(uid) && (isAdmin() || (isVerifiedUser() && request.auth.uid == uid));
+      allow get: if isValidId(uid) && (isAdmin() || (isAuthenticatedAppUser() && request.auth.uid == uid));
       allow list: if isAdmin();
       allow create, update: if isAdmin() && isValidId(uid) && isValidAdminMember(incoming());
       allow delete: if isAdmin() && isValidId(uid);
     }
 
     match /settings/{settingId} {
-      allow get: if isValidId(settingId) && (settingId == 'whatsappSupport' || isVerifiedUser() || isAdmin());
+      allow get: if isValidId(settingId) && (settingId == 'whatsappSupport' || isAuthenticatedAppUser() || isAdmin());
       allow list: if isAdmin();
       allow create: if isAdmin() && isValidId(settingId) && isValidSetting(incoming()) && incoming().updatedAt == request.time;
       allow update: if isAdmin() && isValidId(settingId) && isValidSetting(incoming()) && incoming().updatedAt == request.time;
@@ -238,21 +241,13 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isValidId(userId) && isValidUser(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
-        isAdmin() ||
-        (isVerifiedUser() && userId == request.auth.uid && incoming().ownerUid == request.auth.uid && incoming().coins == 0 && incoming().status == 'active')
-      );
+      allow get: if isValidId(userId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isAdmin() && isValidId(userId) && isValidUser(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(userId) && isValidUser(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
         isAdmin() ||
-        // Self-service Google user claiming an unclaimed admin-created account atomically with account_claims
-        (isVerifiedUser() && existing().ownerUid == null && incoming().ownerUid == request.auth.uid &&
-          incoming().coins == existing().coins && incoming().status == existing().status &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['ownerUid', 'lastLogin', 'updatedAt']) &&
-          getAfter(/databases/$(database)/documents/account_claims/$(existing().username.lower())).data.claimedByUid == request.auth.uid) ||
-        // Authenticated owner updating lastLogin or deducting coins for a bet/withdrawal
-        (isVerifiedUser() && existing().ownerUid == request.auth.uid &&
+        (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid &&
+          existing().status == 'active' &&
           incoming().ownerUid == existing().ownerUid &&
           incoming().status == existing().status &&
           incoming().username == existing().username &&
@@ -264,26 +259,26 @@ service cloud.firestore {
       match /private/{docId} {
         allow get: if isValidId(userId) && isValidId(docId) && (
           isAdmin() ||
-          (isVerifiedUser() && get(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
+          (isAuthenticatedAppUser() && get(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
         );
         allow list: if isAdmin();
         allow create, update: if isValidId(userId) && isValidId(docId) && isValidUserPrivateInfo(incoming()) && incoming().updatedAt == request.time && (
           isAdmin() ||
-          (isVerifiedUser() && get(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
+          (isAuthenticatedAppUser() && get(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
         );
         allow delete: if isAdmin() && isValidId(userId) && isValidId(docId);
       }
     }
 
     match /account_claims/{usernameKey} {
-      allow get: if isValidId(usernameKey) && (isAdmin() || isVerifiedUser());
+      allow get: if isValidId(usernameKey) && (isAdmin() || (isAuthenticatedAppUser() && existing().claimedByUid == request.auth.uid));
       allow list: if isAdmin();
       allow create: if isAdmin() && isValidId(usernameKey) && isValidAccountClaim(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(usernameKey) && isValidAccountClaim(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
         isAdmin() ||
-        (isVerifiedUser() && existing().claimedByUid == null && incoming().claimedByUid == request.auth.uid &&
-          incoming().userId == existing().userId && incoming().username == existing().username && incoming().accessCode == existing().accessCode &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['claimedByUid', 'updatedAt']))
+        (isAuthenticatedAppUser() && existing().claimedByUid == request.auth.uid &&
+          incoming().userId == existing().userId && incoming().username == existing().username && incoming().claimedByUid == existing().claimedByUid &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['accessCode', 'updatedAt']))
       );
       allow delete: if isAdmin() && isValidId(usernameKey);
     }
@@ -294,7 +289,7 @@ service cloud.firestore {
       allow create: if isAdmin() && isValidId(predictionId) && isValidPrediction(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(predictionId) && isValidPrediction(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
         isAdmin() ||
-        (isVerifiedUser() && existing().status == 'open' &&
+        (isAuthenticatedAppUser() && existing().status == 'open' &&
           incoming().status == existing().status &&
           incoming().yesOdds == existing().yesOdds &&
           incoming().noOdds == existing().noOdds &&
@@ -307,38 +302,44 @@ service cloud.firestore {
     }
 
     match /bets/{betId} {
-      allow get: if isValidId(betId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isVerifiedUser() && isValidId(betId) && isValidBet(incoming()) &&
+      allow get: if isValidId(betId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isAuthenticatedAppUser() && isValidId(betId) && isValidBet(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().result == 'pending' &&
         incoming().actualWinnings == 0 &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.status == 'active' &&
         exists(/databases/$(database)/documents/predictions/$(incoming().predictionId));
       allow update: if isAdmin() && isValidId(betId) && isValidBet(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(betId);
     }
 
     match /transactions/{txId} {
-      allow get: if isValidId(txId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
+      allow get: if isValidId(txId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
       allow create: if isValidId(txId) && isValidTransaction(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
         isAdmin() ||
-        (isVerifiedUser() && incoming().ownerUid == request.auth.uid && incoming().type in ['bet_placed', 'withdrawal'])
+        (isAuthenticatedAppUser() && incoming().ownerUid == request.auth.uid && incoming().type in ['bet_placed', 'withdrawal'] &&
+          get(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid &&
+          get(/databases/$(database)/documents/users/$(incoming().userId)).data.status == 'active')
       );
       allow update: if isAdmin() && isValidId(txId) && isValidTransaction(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(txId);
     }
 
     match /deposits/{depositId} {
-      allow get: if isValidId(depositId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isVerifiedUser() && isValidId(depositId) && isValidDeposit(incoming()) &&
+      allow get: if isValidId(depositId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isAuthenticatedAppUser() && isValidId(depositId) && isValidDeposit(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().status == 'pending' &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.status == 'active';
       allow update: if isAdmin() && isValidId(depositId) && isValidDeposit(incoming()) &&
         existing().status == 'pending' &&
         incoming().id == existing().id &&
@@ -350,13 +351,15 @@ service cloud.firestore {
     }
 
     match /withdrawals/{withdrawalId} {
-      allow get: if isValidId(withdrawalId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
-      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isVerifiedUser() && isValidId(withdrawalId) && isValidWithdrawal(incoming()) &&
+      allow get: if isValidId(withdrawalId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isAuthenticatedAppUser() && isValidId(withdrawalId) && isValidWithdrawal(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
         incoming().status == 'pending' &&
         incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.status == 'active';
       allow update: if isAdmin() && isValidId(withdrawalId) && isValidWithdrawal(incoming()) &&
         existing().status in ['pending', 'processing'] &&
         incoming().id == existing().id &&

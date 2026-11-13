@@ -17,7 +17,7 @@ interface UserLoginProps {
 }
 
 export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
-  const { loginUser, loginUserWithGoogle } = useApp();
+  const { loginUser } = useApp();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -33,16 +33,6 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
     setIsLoading(false);
     if (!res.success) {
       setErrorMsg(res.error || 'Invalid credentials');
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    setErrorMsg('');
-    setIsLoading(true);
-    const res = await loginUserWithGoogle();
-    setIsLoading(false);
-    if (!res.success) {
-      setErrorMsg(res.error || 'Google sign-in failed');
     }
   };
 
@@ -147,38 +137,14 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
             </motion.button>
           </form>
 
-          <div className="relative flex items-center py-1">
-            <div className="flex-grow border-t border-slate-800" />
-            <span className="shrink mx-3 text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-              Or
-            </span>
-            <div className="flex-grow border-t border-slate-800" />
-          </div>
-
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.98 }}
-            disabled={isLoading}
-            onClick={handleGoogleLogin}
-            className="w-full py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
-              <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
-              <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z"/>
-              <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"/>
-              <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"/>
-            </svg>
-            <span>Continue with Google</span>
-          </motion.button>
-
           {/* Admin-Managed Registration Notice */}
           <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
             <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
               <Info className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Admin-Managed Cloud Accounts</span>
+              <span>Admin-Managed Accounts</span>
             </div>
             <p className="text-slate-500 text-[10px]">
-              Enter the username & password provided by the administrator (you will verify once with Google to link your account across devices), or sign in directly with Google.
+              User accounts are issued by the platform administrator. Sign in directly with the username and password provided to you — no email required.
             </p>
           </div>
 

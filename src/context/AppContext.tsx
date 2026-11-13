@@ -6,6 +6,7 @@ import {
   BOOTSTRAPPED_ADMIN_EMAIL,
   checkIsFirebaseAdmin,
   fsAdjustUserCoins,
+  fsChangeOwnPassword,
   fsCreatePrediction,
   fsCreateUser,
   fsDeletePrediction,
@@ -26,7 +27,7 @@ import {
   logoutFirebase,
   seedInitialFirestoreIfNeeded,
   signInAdminWithGoogle,
-  signInUserWithGoogleOrClaim,
+  signInUserWithCredentials,
   subscribeAdminPortalData,
   subscribePublicData,
   subscribeUserPortalData
@@ -73,7 +74,6 @@ interface AppContextType {
   adminUser: User | null;
   isHydrating: boolean;
   loginUser: (username: string, pass: string) => Promise<ActionResult>;
-  loginUserWithGoogle: () => Promise<ActionResult>;
   loginAdmin: (username: string, pass: string) => Promise<ActionResult>;
   loginAdminWithGoogle: () => Promise<ActionResult>;
   logout: () => void;
@@ -351,20 +351,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // --- Auth Functions ---
 
   const loginUser = async (username: string, pass: string): Promise<ActionResult> => {
-    const res = await signInUserWithGoogleOrClaim(username, pass);
+    const res = await signInUserWithCredentials(username, pass);
     if (!res.success || !res.userId) {
       return { success: false, error: res.error || 'Invalid credentials' };
-    }
-    safeSetStorage(STORAGE_KEYS.USER_DOC_ID, res.userId);
-    setActiveUserId(res.userId);
-    setActivePortal('user');
-    return { success: true };
-  };
-
-  const loginUserWithGoogle = async (): Promise<ActionResult> => {
-    const res = await signInUserWithGoogleOrClaim();
-    if (!res.success || !res.userId) {
-      return { success: false, error: res.error || 'Google sign-in failed' };
     }
     safeSetStorage(STORAGE_KEYS.USER_DOC_ID, res.userId);
     setActiveUserId(res.userId);
@@ -394,9 +383,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     void logoutFirebase();
   };
 
-  const changePassword = async (_userId: string, _oldPass: string, newPass: string): Promise<ActionResult> => {
+  const changePassword = async (_userId: string, oldPass: string, newPass: string): Promise<ActionResult> => {
     if (!currentUser) return { success: false, error: 'Not signed in' };
-    return fsResetUserPassword(currentUser, newPass);
+    return fsChangeOwnPassword(currentUser, oldPass, newPass);
   };
 
   const changeAdminCredentials = async (
@@ -655,7 +644,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adminUser,
         isHydrating,
         loginUser,
-        loginUserWithGoogle,
         loginAdmin,
         loginAdminWithGoogle,
         logout,

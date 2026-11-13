@@ -1,5 +1,5 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -8,6 +8,12 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+export function getSecondaryAuth(): Auth {
+  const existing = getApps().find(a => a.name === 'adminProvisioner');
+  const secApp = existing || initializeApp(firebaseConfig, 'adminProvisioner');
+  return getAuth(secApp);
+}
 
 export enum OperationType {
   CREATE = 'create',
