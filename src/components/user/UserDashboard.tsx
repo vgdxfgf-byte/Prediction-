@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useApp } from '../../context/AppContext';
 import { Prediction } from '../../types';
+import cricketHeroImg from '../../assets/images/hero_cricket_stadium_1794598510096.jpg';
+import cinemaHeroImg from '../../assets/images/hero_cinema_premiere_1794598510861.jpg';
 import {
   Coins,
   Trophy,
@@ -11,7 +13,6 @@ import {
   ArrowDownLeft,
   Clock,
   ArrowRight,
-  Sparkles,
   ShieldCheck,
   Flame,
   Plus,
@@ -20,7 +21,10 @@ import {
   Wallet,
   History,
   Film,
-  Compass
+  BarChart3,
+  CheckCircle2,
+  XCircle,
+  ChevronRight
 } from 'lucide-react';
 import { WhatsAppSupportButton } from '../common/WhatsAppSupportButton';
 
@@ -43,6 +47,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 }) => {
   const { currentUser, bets, transactions, predictions, withdrawals } = useApp();
   const [marketFilter, setMarketFilter] = useState<SpotlightFilter>('All');
+  const [heroSlide, setHeroSlide] = useState<'cricket' | 'movies'>('cricket');
+  const [heroImgError, setHeroImgError] = useState<Record<string, boolean>>({});
 
   const allOpenMarkets = predictions.filter(p => p.status === 'open');
 
@@ -87,265 +93,354 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   const pendingWithdrawalsAmount = pendingWithdrawals.reduce((sum, w) => sum + w.amount, 0);
 
   const userTransactions = transactions.filter(t => t.userId === currentUser.id).slice(0, 5);
-
   const initials = currentUser.username.substring(0, 2).toUpperCase();
 
   const kpiCards = [
     {
-      label: 'Available Coins',
-      value: currentUser.coins.toLocaleString(),
-      sub: 'Ready to predict',
-      subClass: 'text-slate-400',
-      valueClass: 'text-emerald-400',
-      hoverClass: 'hover:border-emerald-500/40',
-      icon: <Coins className="w-4 h-4 text-amber-400" />
-    },
-    {
       label: 'Total Winnings',
       value: totalWinningCoins.toLocaleString(),
-      sub: `From ${wonBets.length} winning picks`,
-      subClass: 'text-emerald-500/80 font-medium',
-      valueClass: 'text-emerald-300',
-      hoverClass: 'hover:border-emerald-500/40',
-      icon: <Trophy className="w-4 h-4 text-emerald-400" />
+      sub: `${wonBets.length} won picks`,
+      valueClass: 'text-[#14e071]',
+      icon: <Trophy className="w-4 h-4 text-[#14e071]" />
     },
     {
       label: 'Total Losses',
       value: totalLosingCoins.toLocaleString(),
-      sub: `Across ${lostBets.length} settled bets`,
-      subClass: 'text-rose-400/80 font-medium',
+      sub: `${lostBets.length} settled`,
       valueClass: 'text-rose-400',
-      hoverClass: 'hover:border-rose-500/40',
       icon: <TrendingDown className="w-4 h-4 text-rose-400" />
     },
     {
-      label: 'Active Bets',
+      label: 'Active Slips',
       value: activeBets.length.toLocaleString(),
-      sub: 'Awaiting match results',
-      subClass: 'text-slate-400',
-      valueClass: 'text-blue-400',
-      hoverClass: 'hover:border-blue-500/40',
-      icon: <Activity className="w-4 h-4 text-blue-400" />
+      sub: 'Awaiting result',
+      valueClass: 'text-sky-400',
+      icon: <Activity className="w-4 h-4 text-sky-400" />
     },
     {
       label: 'Total Predictions',
       value: userBets.length.toLocaleString(),
       sub: 'Lifetime activity',
-      subClass: 'text-slate-400',
-      valueClass: 'text-slate-200',
-      hoverClass: 'hover:border-slate-700',
-      icon: <ShieldCheck className="w-4 h-4 text-slate-400" />
+      valueClass: 'text-white',
+      icon: <ShieldCheck className="w-4 h-4 text-slate-300" />
     },
     {
       label: 'Pending Payout',
       value: pendingWithdrawalsAmount.toLocaleString(),
-      sub: `${pendingWithdrawals.length} request(s) under review`,
-      subClass: 'text-slate-400',
+      sub: `${pendingWithdrawals.length} under review`,
       valueClass: 'text-amber-400',
-      hoverClass: 'hover:border-amber-500/40',
       icon: <Clock className="w-4 h-4 text-amber-400" />
     }
   ];
 
-  const profileQuickButtons = [
+  const quickTiles = [
     {
-      id: 'profile',
-      label: 'Profile & Password',
-      sub: `@${currentUser.username}`,
-      icon: KeyRound,
-      accent: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-      hoverBorder: 'hover:border-emerald-500/50',
-      onClick: onOpenProfile
+      id: 'markets',
+      label: 'Markets',
+      sub: `${allOpenMarkets.length} open`,
+      icon: BarChart3,
+      featured: true,
+      onClick: () => onNavigateTab('predictions')
     },
     {
-      id: 'history',
-      label: 'My Slips & History',
-      sub: `${userBets.length} total picks`,
-      icon: History,
-      accent: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-      hoverBorder: 'hover:border-blue-500/50',
+      id: 'predictions',
+      label: 'My Predictions',
+      sub: `${userBets.length} slips`,
+      icon: Trophy,
+      featured: false,
       onClick: () => onNavigateTab('history')
     },
     {
       id: 'wallet',
-      label: 'Wallet & Payouts',
-      sub: `${currentUser.coins.toLocaleString()} coins`,
+      label: 'Wallet',
+      sub: 'Coins & UPI',
       icon: Wallet,
-      accent: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-      hoverBorder: 'hover:border-amber-500/50',
+      featured: false,
       onClick: () => onNavigateTab('wallet')
     },
     {
-      id: 'markets',
-      label: 'Cricket & Movie Markets',
-      sub: `${allOpenMarkets.length} open events`,
-      icon: Compass,
-      accent: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
-      hoverBorder: 'hover:border-purple-500/50',
-      onClick: () => onNavigateTab('predictions')
+      id: 'profile',
+      label: 'Profile & Security',
+      sub: `@${currentUser.username}`,
+      icon: KeyRound,
+      featured: false,
+      onClick: onOpenProfile
     }
   ];
 
+  const activeSlide =
+    heroSlide === 'cricket'
+      ? {
+          id: 'cricket',
+          kicker: 'Cricket Live Markets',
+          title: 'Predict & Win Big Rewards',
+          desc: 'T20 battles, match winners & over totals with instant coin payout.',
+          cta: 'Play Cricket',
+          img: cricketHeroImg,
+          filter: 'Cricket' as SpotlightFilter
+        }
+      : {
+          id: 'movies',
+          kicker: 'Cinema Box Office',
+          title: 'Movie Premiere Predictions',
+          desc: 'Opening weekend box office & audience ratings settled fast.',
+          cta: 'Play Movies',
+          img: cinemaHeroImg,
+          filter: 'Movies' as SpotlightFilter
+        };
+
   return (
     <div className="space-y-6">
-      {/* Welcome Hero Banner with Profile Identity & Actions */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-        className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800/95 to-emerald-950 p-6 border border-slate-800 shadow-xl"
-      >
-        <div className="absolute right-0 top-0 bottom-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.16),transparent_70%)] pointer-events-none" />
-        <div className="animate-shimmer absolute inset-0 bg-gradient-to-r from-transparent via-emerald-400/[0.04] to-transparent pointer-events-none" />
+      {/* Top Split: Screen 1 Balance Hero Card + Featured Stadium/Cinema Banner */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+        {/* Left 7 Cols: Signature Emerald Balance Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.26, ease: [0.16, 1, 0.3, 1] }}
+          className="lg:col-span-7 apex-card-emerald rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between gap-5"
+        >
+          <div className="animate-shimmer absolute inset-0 bg-gradient-to-r from-transparent via-[#14e071]/[0.05] to-transparent pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5">
-          <div className="flex items-start sm:items-center gap-4">
-            {/* Animated User Profile Avatar */}
+          {/* User Identity Row */}
+          <div className="relative z-10 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <motion.button
+                type="button"
+                onClick={onOpenProfile}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="w-11 h-11 rounded-xl bg-emerald-500/20 border border-[#14e071]/40 flex items-center justify-center font-black text-sm text-[#14e071] shrink-0 cursor-pointer"
+                title="Open Profile & Password"
+              >
+                {initials}
+              </motion.button>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                  <span className="font-semibold text-white truncate">{currentUser.fullName}</span>
+                  <span className="text-slate-500">·</span>
+                  <span className="text-[#14e071] font-medium truncate">@{currentUser.username}</span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Account #{currentUser.id.replace('usr_', '')}
+                </div>
+              </div>
+            </div>
+
             <motion.button
               type="button"
-              onClick={onOpenProfile}
-              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.96 }}
-              title="Open Profile & Security"
-              className="relative shrink-0 w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/25 to-cyan-500/20 border border-emerald-400/40 flex items-center justify-center shadow-lg shadow-emerald-950/50 cursor-pointer group"
+              onClick={onOpenProfile}
+              className="px-3 py-1.5 rounded-xl bg-[#091217]/90 hover:bg-[#0f1d24] border border-white/[0.1] text-slate-200 hover:text-[#14e071] text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
             >
-              <span className="font-black text-lg text-emerald-300 tracking-tight group-hover:text-white transition-colors">
-                {initials}
-              </span>
-              <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-md bg-slate-900 border border-emerald-500/40 flex items-center justify-center">
-                <UserIcon className="w-3 h-3 text-emerald-400" />
-              </span>
+              <UserIcon className="w-3.5 h-3.5 text-[#14e071]" />
+              Profile
             </motion.button>
+          </div>
 
-            <div>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mb-1">
-                <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Live Exchange
-                </span>
-                <span>·</span>
-                <span>@{currentUser.username}</span>
-                <span>·</span>
-                <span>Account #{currentUser.id.replace('usr_', '')}</span>
+          {/* Screen 1 Balance Display + + Deposit Button */}
+          <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-[0_6px_20px_-4px_rgba(245,158,11,0.55)] shrink-0">
+                <Coins className="w-6 h-6 text-[#1a1102] stroke-[2.25]" />
               </div>
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                Welcome back,{' '}
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-200">
-                  {currentUser.fullName}
-                </span>
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-xl">
-                Predict outcomes across live Cricket matches, Box Office Movies, Football, and Crypto markets with instant coin settlement.
-              </p>
+              <div>
+                <div className="text-xs text-slate-300 font-medium">Your Balance</div>
+                <div className="font-mono-numbers text-3xl sm:text-4xl font-black text-white tracking-tight leading-none mt-1">
+                  {currentUser.coins.toLocaleString()}.00
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.96 }}
+                onClick={onOpenDeposit}
+                className="px-4 py-2.5 rounded-xl apex-glow-btn font-bold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                Deposit
+              </motion.button>
+
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.96 }}
+                onClick={onOpenWithdraw}
+                className="px-3.5 py-2.5 rounded-xl bg-[#0a141a]/90 hover:bg-[#112029] text-slate-200 border border-white/[0.1] font-semibold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
+              >
+                <ArrowUpRight className="w-4 h-4 text-[#14e071]" />
+                Withdraw
+              </motion.button>
+
+              <WhatsAppSupportButton username={currentUser.username} variant="dashboard" />
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Right 5 Cols: Promotional Cricket & Cinema Hero Banner (Screen 1 inspired) */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.28, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
+          className="lg:col-span-5 relative rounded-2xl overflow-hidden border border-white/[0.1] bg-[#0b1318] min-h-[195px] flex flex-col justify-between p-5 shadow-xl"
+        >
+          {/* Background Image with Styled Fallback */}
+          {!heroImgError[activeSlide.id] ? (
+            <img
+              src={activeSlide.img}
+              alt={activeSlide.title}
+              referrerPolicy="no-referrer"
+              onError={() => setHeroImgError(prev => ({ ...prev, [activeSlide.id]: true }))}
+              className="absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-300"
+            />
+          ) : (
+            <div className="absolute inset-0 bg-gradient-to-br from-emerald-950 via-[#0a1419] to-black" />
+          )}
+
+          {/* Measured contrast scrim */}
+          <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-[#060b0e]/80 to-[#060b0e]/95" />
+
+          <div className="relative z-10 flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#14e071]">
+              {activeSlide.kicker}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                aria-label="Cricket banner"
+                onClick={() => setHeroSlide('cricket')}
+                className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                  heroSlide === 'cricket' ? 'w-5 bg-[#14e071]' : 'w-2 bg-white/30 hover:bg-white/50'
+                }`}
+              />
+              <button
+                type="button"
+                aria-label="Movies banner"
+                onClick={() => setHeroSlide('movies')}
+                className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                  heroSlide === 'movies' ? 'w-5 bg-[#14e071]' : 'w-2 bg-white/30 hover:bg-white/50'
+                }`}
+              />
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 self-stretch lg:self-auto">
-            <motion.button
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={onOpenProfile}
-              className="px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 font-semibold text-xs flex items-center justify-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <UserIcon className="w-4 h-4 text-emerald-400" />
-              My Profile
-            </motion.button>
-            <motion.button
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={onOpenDeposit}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              Deposit Coins
-            </motion.button>
-            <motion.button
-              whileHover={{ y: -1 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={onOpenWithdraw}
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <ArrowUpRight className="w-4 h-4 text-slate-400" />
-              Withdraw
-            </motion.button>
-            <WhatsAppSupportButton username={currentUser.username} variant="dashboard" />
-          </div>
-        </div>
-      </motion.div>
+          <div className="relative z-10 flex items-end justify-between gap-4 mt-auto pt-6">
+            <div className="max-w-[230px]">
+              <h2 className="text-lg sm:text-xl font-black text-white leading-tight">
+                {activeSlide.title}
+              </h2>
+              <p className="text-[11px] text-slate-300 mt-1 line-clamp-2">
+                {activeSlide.desc}
+              </p>
+            </div>
 
-      {/* Profile & Quick Action Buttons Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {profileQuickButtons.map((btn, idx) => {
-          const Icon = btn.icon;
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.96 }}
+              onClick={() => {
+                setMarketFilter(activeSlide.filter);
+                onNavigateTab('predictions');
+              }}
+              className="px-4 py-2 rounded-xl apex-glow-btn font-bold text-xs flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              {activeSlide.cta}
+              <ArrowRight className="w-3.5 h-3.5" />
+            </motion.button>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* Screen 1 Signature 4 Quick Action Tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {quickTiles.map((tile, idx) => {
+          const Icon = tile.icon;
           return (
             <motion.button
-              key={btn.id}
+              key={tile.id}
               type="button"
-              onClick={btn.onClick}
+              onClick={tile.onClick}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.22, delay: 0.04 * idx, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: 0.2, delay: 0.04 * idx, ease: [0.16, 1, 0.3, 1] }}
               whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.98 }}
-              className={`bg-slate-900/90 border border-slate-800 ${btn.hoverBorder} rounded-xl px-4 py-3 flex items-center justify-between gap-3 text-left transition-colors shadow-sm cursor-pointer group`}
+              whileTap={{ scale: 0.97 }}
+              className={`rounded-2xl p-4 flex items-center justify-between gap-3 text-left transition cursor-pointer ${
+                tile.featured
+                  ? 'bg-gradient-to-br from-[#16f27b] to-[#0cb65a] text-[#04130b] shadow-[0_12px_28px_-10px_rgba(20,224,113,0.6)]'
+                  : 'apex-card hover:border-emerald-500/35 text-slate-100'
+              }`}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <div className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 ${btn.accent}`}>
-                  <Icon className="w-4 h-4" />
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    tile.featured
+                      ? 'bg-[#04130b]/15 text-[#04130b]'
+                      : 'bg-white/[0.06] text-[#14e071] border border-white/[0.06]'
+                  }`}
+                >
+                  <Icon className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-xs font-bold text-slate-100 group-hover:text-white whitespace-nowrap truncate">
-                    {btn.label}
-                  </div>
-                  <div className="text-[11px] text-slate-400 font-mono-numbers truncate">
-                    {btn.sub}
+                  <div className="text-xs font-bold whitespace-nowrap truncate">{tile.label}</div>
+                  <div
+                    className={`text-[11px] font-mono-numbers truncate ${
+                      tile.featured ? 'text-[#04130b]/80 font-semibold' : 'text-slate-400'
+                    }`}
+                  >
+                    {tile.sub}
                   </div>
                 </div>
               </div>
-              <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-slate-200 group-hover:translate-x-0.5 transition shrink-0" />
+              <ChevronRight
+                className={`w-4 h-4 shrink-0 ${
+                  tile.featured ? 'text-[#04130b]/80' : 'text-slate-500'
+                }`}
+              />
             </motion.button>
           );
         })}
       </div>
 
-      {/* KPI Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      {/* KPI Metrics Row */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {kpiCards.map((card, idx) => (
           <motion.div
             key={card.label}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.22, delay: Math.min(idx * 0.04, 0.24), ease: [0.16, 1, 0.3, 1] }}
-            whileHover={{ y: -2 }}
-            className={`bg-slate-900/90 p-4 rounded-xl border border-slate-800 shadow-sm relative overflow-hidden group ${card.hoverClass} transition-colors`}
+            transition={{ duration: 0.2, delay: Math.min(idx * 0.04, 0.2), ease: [0.16, 1, 0.3, 1] }}
+            className="apex-card rounded-xl p-4"
           >
-            <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
               <span className="truncate">{card.label}</span>
-              <div className="w-6 h-6 rounded-lg bg-slate-800/80 flex items-center justify-center shrink-0">
+              <span className="w-7 h-7 rounded-lg bg-white/[0.04] flex items-center justify-center shrink-0">
                 {card.icon}
-              </div>
+              </span>
             </div>
-            <div className={`mt-2 font-mono-numbers text-2xl font-black ${card.valueClass}`}>
+            <div className={`mt-2 font-mono-numbers text-xl sm:text-2xl font-black ${card.valueClass}`}>
               {card.value}
             </div>
-            <div className={`text-[10px] mt-0.5 ${card.subClass}`}>{card.sub}</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">{card.sub}</div>
           </motion.div>
         ))}
       </div>
 
-      {/* Main Content Split: Cricket & Movies Spotlight Markets + Recent Bets */}
+      {/* Main Content Split: Live Markets (Cricket & Movies) + Active Slips & Ledger */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Cricket & Movies Spotlight Predictions */}
+        {/* Left 2 Cols: Live Markets */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <Flame className="w-5 h-5 text-amber-400" />
-              <h2 className="text-lg font-bold text-white">Cricket & Movie Spotlight</h2>
+              <Flame className="w-5 h-5 text-[#14e071]" />
+              <h2 className="text-lg font-bold text-white">Live Markets</h2>
+              <span className="text-xs text-[#14e071] font-semibold">· Cricket & Movies</span>
             </div>
 
             <div className="flex items-center justify-between sm:justify-end gap-3">
-              {/* Animated Spotlight Category Tabs */}
-              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+              {/* Spotlight Filter Tabs */}
+              <div className="flex items-center gap-1 bg-[#0b1318] p-1 rounded-xl border border-white/[0.08]">
                 {(['All', 'Cricket', 'Movies'] as SpotlightFilter[]).map(tab => {
                   const isActive = marketFilter === tab;
                   return (
@@ -354,14 +449,14 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                       type="button"
                       onClick={() => setMarketFilter(tab)}
                       className={`relative px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
-                        isActive ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+                        isActive ? 'text-[#04130b]' : 'text-slate-400 hover:text-slate-200'
                       }`}
                     >
                       {isActive && (
                         <motion.span
                           layoutId="dashboardMarketTab"
                           transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                          className="absolute inset-0 rounded-lg bg-emerald-600 shadow-sm shadow-emerald-950/50"
+                          className="absolute inset-0 rounded-lg bg-[#14e071]"
                         />
                       )}
                       <span className="relative z-10 flex items-center gap-1.5">
@@ -376,9 +471,9 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 
               <button
                 onClick={() => onNavigateTab('predictions')}
-                className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 whitespace-nowrap shrink-0 transition cursor-pointer"
+                className="text-xs font-semibold text-[#14e071] hover:text-emerald-300 flex items-center gap-1 whitespace-nowrap shrink-0 transition cursor-pointer"
               >
-                All ({allOpenMarkets.length})
+                View All
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -392,13 +487,13 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.18 }}
-                className="bg-slate-900/70 rounded-2xl border border-slate-800 p-10 text-center space-y-3"
+                className="apex-card rounded-2xl p-10 text-center space-y-3"
               >
-                <div className="w-11 h-11 rounded-xl bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
+                <div className="w-11 h-11 rounded-xl bg-white/[0.05] text-[#14e071] mx-auto flex items-center justify-center">
                   {marketFilter === 'Movies' ? (
                     <Film className="w-5 h-5 text-purple-400" />
                   ) : (
-                    <Trophy className="w-5 h-5 text-emerald-400" />
+                    <Trophy className="w-5 h-5 text-[#14e071]" />
                   )}
                 </div>
                 <div className="space-y-1">
@@ -411,7 +506,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                 </div>
                 <button
                   onClick={() => onNavigateTab('predictions')}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition cursor-pointer"
+                  className="px-4 py-2 rounded-xl apex-glow-btn text-xs font-bold transition cursor-pointer"
                 >
                   Open All Markets
                 </button>
@@ -427,7 +522,6 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               >
                 {spotlightMarkets.map((pred, idx) => {
                   const closeDate = new Date(pred.closingTime);
-                  const isClosingSoon = closeDate.getTime() - Date.now() < 12 * 3600 * 1000;
                   const isMovie = pred.category === 'Movies';
                   const isCricket = pred.category === 'Cricket';
 
@@ -442,84 +536,68 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                         ease: [0.16, 1, 0.3, 1]
                       }}
                       whileHover={{ y: -3 }}
-                      className="bg-slate-900/85 rounded-2xl border border-slate-800 hover:border-slate-700 p-4 flex flex-col justify-between transition-colors shadow-md group"
+                      className="apex-card hover:border-emerald-500/40 rounded-2xl p-4 flex flex-col justify-between transition-colors group"
                     >
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between text-[11px]">
-                          <span
-                            className={`font-semibold flex items-center gap-1.5 ${
-                              isMovie
-                                ? 'text-purple-300'
-                                : isCricket
-                                  ? 'text-emerald-300'
-                                  : 'text-slate-300'
-                            }`}
-                          >
+                        <div className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="flex items-center gap-1.5 font-semibold text-slate-300 min-w-0">
                             {isMovie ? (
-                              <Film className="w-3.5 h-3.5 text-purple-400" />
+                              <Film className="w-3.5 h-3.5 text-purple-400 shrink-0" />
                             ) : isCricket ? (
-                              <Trophy className="w-3.5 h-3.5 text-emerald-400" />
-                            ) : null}
-                            <span>{pred.category}</span>
-                            <span className="text-slate-600">·</span>
-                            <span className="text-slate-400 font-normal truncate max-w-[140px]">
-                              {pred.subtitle}
-                            </span>
+                              <Trophy className="w-3.5 h-3.5 text-[#14e071] shrink-0" />
+                            ) : (
+                              <Activity className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                            )}
+                            <span className="truncate">{pred.subtitle || pred.category}</span>
                           </span>
 
-                          <span
-                            className={`flex items-center gap-1 font-mono-numbers text-[10px] shrink-0 ${
-                              isClosingSoon ? 'text-amber-400 font-bold' : 'text-slate-400'
-                            }`}
-                          >
-                            <Clock className="w-3 h-3" />
-                            {isClosingSoon
-                              ? 'Closing soon'
-                              : closeDate.toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
+                          <span className="font-mono-numbers text-[10px] text-slate-400 shrink-0">
+                            {closeDate.toLocaleDateString([], { month: 'short', day: 'numeric' })},{' '}
+                            {closeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
 
-                        <h3 className="font-bold text-sm text-slate-100 group-hover:text-emerald-300 transition leading-snug">
+                        <h3 className="font-bold text-sm text-white group-hover:text-[#14e071] transition leading-snug">
                           {pred.title}
                         </h3>
-                        {pred.description && (
-                          <p className="text-xs text-slate-400 line-clamp-2">{pred.description}</p>
-                        )}
                       </div>
 
-                      <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2.5">
+                      <div className="mt-4 pt-3 border-t border-white/[0.06] space-y-2.5">
                         <div className="flex justify-between items-center text-[11px] text-slate-400 font-mono-numbers">
                           <span>
-                            Volume: {(pred.totalYesVolume + pred.totalNoVolume).toLocaleString()} coins
+                            Pool: {(pred.totalYesVolume + pred.totalNoVolume).toLocaleString()} coins
                           </span>
-                          <span>Min: {pred.minBet} coins</span>
+                          <span>Min: {pred.minBet}</span>
                         </div>
 
-                        {/* Instant YES / NO prediction buttons */}
-                        <div className="grid grid-cols-2 gap-2">
+                        {/* Screen 1 & 2 YES / NO Split Action Buttons */}
+                        <div className="grid grid-cols-2 gap-2.5">
                           <motion.button
-                            whileHover={{ scale: 1.01 }}
+                            whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.96 }}
                             onClick={() => onSelectPrediction(pred, 'YES')}
-                            className="py-2 px-3 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/30 hover:border-emerald-500 text-emerald-300 font-bold text-xs flex items-center justify-between transition cursor-pointer"
+                            className="py-2.5 px-3 rounded-xl bg-emerald-950/55 hover:bg-emerald-900/70 border border-[#14e071]/40 hover:border-[#14e071] text-white font-bold text-xs flex items-center justify-between transition cursor-pointer"
                           >
-                            <span>YES</span>
-                            <span className="font-mono-numbers bg-emerald-500/20 px-1.5 py-0.5 rounded text-[11px]">
+                            <span className="flex items-center gap-1.5 text-[#14e071]">
+                              <CheckCircle2 className="w-4 h-4 shrink-0" />
+                              YES
+                            </span>
+                            <span className="font-mono-numbers font-extrabold text-white">
                               {pred.yesOdds.toFixed(2)}x
                             </span>
                           </motion.button>
 
                           <motion.button
-                            whileHover={{ scale: 1.01 }}
+                            whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.96 }}
                             onClick={() => onSelectPrediction(pred, 'NO')}
-                            className="py-2 px-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 hover:border-rose-500 text-rose-300 font-bold text-xs flex items-center justify-between transition cursor-pointer"
+                            className="py-2.5 px-3 rounded-xl bg-rose-950/45 hover:bg-rose-900/65 border border-rose-500/35 hover:border-rose-400 text-white font-bold text-xs flex items-center justify-between transition cursor-pointer"
                           >
-                            <span>NO</span>
-                            <span className="font-mono-numbers bg-rose-500/20 px-1.5 py-0.5 rounded text-[11px]">
+                            <span className="flex items-center gap-1.5 text-rose-400">
+                              <XCircle className="w-4 h-4 shrink-0" />
+                              NO
+                            </span>
+                            <span className="font-mono-numbers font-extrabold text-white">
                               {pred.noOdds.toFixed(2)}x
                             </span>
                           </motion.button>
@@ -533,30 +611,30 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
           </AnimatePresence>
         </div>
 
-        {/* Right Col: Active Bets & Recent Activity */}
+        {/* Right Col: Active Slips & Recent Activity */}
         <div className="space-y-5">
-          {/* Active Bets Card */}
+          {/* Active Slips */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25, delay: 0.08 }}
-            className="bg-slate-900/90 rounded-2xl border border-slate-800 p-4 shadow-md space-y-3"
+            transition={{ duration: 0.24, delay: 0.08 }}
+            className="apex-card rounded-2xl p-4 space-y-3"
           >
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-sm text-white flex items-center gap-1.5">
-                <Activity className="w-4 h-4 text-emerald-400" />
+              <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                <History className="w-4 h-4 text-[#14e071]" />
                 Active Slips ({activeBets.length})
               </h3>
               <button
                 onClick={() => onNavigateTab('history')}
-                className="text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                className="text-[11px] font-semibold text-[#14e071] hover:text-emerald-300 transition cursor-pointer"
               >
-                Full History →
+                View All →
               </button>
             </div>
 
             {activeBets.length === 0 ? (
-              <div className="py-6 text-center text-slate-500 text-xs">
+              <div className="py-6 text-center text-slate-400 text-xs">
                 No active predictions. Pick a market to start!
               </div>
             ) : (
@@ -567,29 +645,25 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                     initial={{ opacity: 0, x: 8 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.18, delay: idx * 0.04 }}
-                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-1"
+                    className="p-3 rounded-xl bg-[#070c10] border border-white/[0.06] text-xs space-y-1"
                   >
                     <div className="flex justify-between items-start gap-2">
                       <span className="font-medium text-slate-200 line-clamp-1 text-[11px]">
                         {b.predictionTitle}
                       </span>
                       <span
-                        className={`font-bold font-mono-numbers px-1.5 py-0.5 rounded text-[10px] shrink-0 ${
-                          b.choice === 'YES'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : 'bg-rose-500/20 text-rose-400'
+                        className={`font-bold font-mono-numbers text-[11px] shrink-0 ${
+                          b.choice === 'YES' ? 'text-[#14e071]' : 'text-rose-400'
                         }`}
                       >
-                        {b.choice} @ {b.odds}x
+                        {b.choice} · {b.odds}x
                       </span>
                     </div>
 
-                    <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono-numbers">
-                      <span>
-                        Stake: <strong className="text-white">{b.amount} coins</strong>
-                      </span>
-                      <span className="text-emerald-400 font-semibold">
-                        Win: {b.potentialWinnings} coins
+                    <div className="flex justify-between items-center text-[11px] text-slate-400 font-mono-numbers">
+                      <span>Stake: {b.amount}</span>
+                      <span className="text-[#14e071] font-semibold">
+                        Win: {b.potentialWinnings}
                       </span>
                     </div>
                   </motion.div>
@@ -598,28 +672,28 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             )}
           </motion.div>
 
-          {/* Recent Transactions Card */}
+          {/* Recent Ledger */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.25, delay: 0.14 }}
-            className="bg-slate-900/90 rounded-2xl border border-slate-800 p-4 shadow-md space-y-3"
+            transition={{ duration: 0.24, delay: 0.14 }}
+            className="apex-card rounded-2xl p-4 space-y-3"
           >
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-sm text-white flex items-center gap-1.5">
+              <h3 className="font-bold text-sm text-white flex items-center gap-2">
                 <Coins className="w-4 h-4 text-amber-400" />
-                Recent Ledger
+                Recent Activities
               </h3>
               <button
                 onClick={() => onNavigateTab('wallet')}
-                className="text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer"
+                className="text-[11px] font-semibold text-[#14e071] hover:text-emerald-300 transition cursor-pointer"
               >
                 Wallet →
               </button>
             </div>
 
             {userTransactions.length === 0 ? (
-              <div className="py-6 text-center text-slate-500 text-xs">
+              <div className="py-6 text-center text-slate-400 text-xs">
                 No transactions recorded yet
               </div>
             ) : (
@@ -632,24 +706,24 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                       initial={{ opacity: 0, x: 8 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ duration: 0.18, delay: idx * 0.04 }}
-                      className="p-2 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between text-xs"
+                      className="p-2.5 rounded-xl bg-[#070c10] border border-white/[0.06] flex items-center justify-between text-xs"
                     >
-                      <div className="flex items-center gap-2 overflow-hidden">
+                      <div className="flex items-center gap-2.5 overflow-hidden">
                         <div
-                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
                             isPositive
-                              ? 'bg-emerald-500/10 text-emerald-400'
-                              : 'bg-slate-800 text-slate-400'
+                              ? 'bg-emerald-500/15 text-[#14e071]'
+                              : 'bg-rose-500/15 text-rose-400'
                           }`}
                         >
                           {isPositive ? (
-                            <ArrowDownLeft className="w-3.5 h-3.5" />
+                            <ArrowDownLeft className="w-4 h-4" />
                           ) : (
-                            <ArrowUpRight className="w-3.5 h-3.5" />
+                            <ArrowUpRight className="w-4 h-4" />
                           )}
                         </div>
                         <div className="truncate">
-                          <div className="text-[11px] font-medium text-slate-300 truncate">
+                          <div className="text-[11px] font-semibold text-slate-200 truncate">
                             {tx.description}
                           </div>
                           <div className="text-[10px] text-slate-500">
@@ -665,11 +739,11 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 
                       <div
                         className={`font-mono-numbers font-bold text-xs shrink-0 pl-2 ${
-                          isPositive ? 'text-emerald-400' : 'text-slate-300'
+                          isPositive ? 'text-[#14e071]' : 'text-rose-400'
                         }`}
                       >
                         {isPositive ? '+' : ''}
-                        {tx.amount}
+                        {tx.amount.toLocaleString()}
                       </div>
                     </motion.div>
                   );

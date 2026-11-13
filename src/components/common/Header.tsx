@@ -9,11 +9,14 @@ import {
   Plus,
   ArrowDownUp,
   ChevronDown,
-  Sparkles,
+  TrendingUp,
+  Crown,
   X,
   CheckCircle2,
   AlertTriangle,
-  Lock
+  Lock,
+  User as UserIcon,
+  LayoutDashboard
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -95,46 +98,54 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
+  const isAdminPortal = activePortal === 'admin';
+
   return (
     <>
-      <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 text-slate-100">
-        {/* Main Navigation Bar */}
+      <header className="sticky top-0 z-40 bg-[#080e13]/95 backdrop-blur-md border-b border-white/[0.07] text-slate-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            {/* Logo & Optional Admin Switcher */}
-            <div className="flex items-center gap-6">
-              <div
-                onClick={() => setCurrentTab(activePortal === 'admin' ? 'dashboard' : 'predictions')}
-                className="flex items-center gap-2 cursor-pointer group"
+          <div className="flex items-center justify-between h-16 gap-4">
+            {/* Zone 1: Brand Identity */}
+            <div className="flex items-center gap-5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setCurrentTab(isAdminPortal ? 'dashboard' : 'dashboard')}
+                className="flex items-center gap-2.5 cursor-pointer group text-left"
               >
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition">
-                  <Sparkles className="w-5 h-5 text-slate-950 font-black" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-black text-lg tracking-tight text-white">APEX</span>
-                    <span className="font-bold text-lg text-emerald-400">PREDICT</span>
-                    <span className="hidden sm:inline-block text-[10px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      EXCHANGE
+                {isAdminPortal ? (
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400/20 to-amber-600/10 border border-amber-400/40 flex items-center justify-center shadow-[0_0_20px_-6px_rgba(245,158,11,0.5)] group-hover:scale-105 transition">
+                    <Crown className="w-5 h-5 text-amber-400" />
+                  </div>
+                ) : (
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#16f27b] to-[#0bb55a] flex items-center justify-center shadow-[0_0_20px_-4px_rgba(20,224,113,0.65)] group-hover:scale-105 transition">
+                    <TrendingUp className="w-5 h-5 text-[#04130b] stroke-[2.5]" />
+                  </div>
+                )}
+
+                <div className="whitespace-nowrap">
+                  <div className="flex items-center gap-1 text-base sm:text-lg tracking-tight leading-none">
+                    <span className="font-black text-white">APEX</span>
+                    <span className={`font-black ${isAdminPortal ? 'text-amber-400' : 'text-[#14e071]'}`}>
+                      {isAdminPortal ? 'ADMIN' : 'PREDICT'}
                     </span>
                   </div>
-                  <div className="text-[10px] text-slate-400 -mt-0.5 tracking-wide">
-                    {activePortal === 'admin' ? 'Management Console' : 'YES / NO Sports Predictions'}
+                  <div className="text-[10px] text-slate-400 mt-0.5 tracking-wide">
+                    {isAdminPortal ? 'Control · Manage · Grow' : 'Predict · Play · Win'}
                   </div>
                 </div>
-              </div>
+              </button>
 
               {/* Portal Toggle Pill (visible when logged in as Admin) */}
               {adminUser && (
-                <div className="hidden md:flex bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                <div className="hidden md:flex bg-[#0c141a] p-1 rounded-xl border border-white/[0.08]">
                   <button
                     onClick={() => {
                       setActivePortal('user');
-                      setCurrentTab('predictions');
+                      setCurrentTab('dashboard');
                     }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer ${
                       activePortal === 'user'
-                        ? 'bg-emerald-600 text-white shadow-sm'
+                        ? 'bg-[#14e071] text-[#04130b] font-bold shadow-sm'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
@@ -146,16 +157,16 @@ export const Header: React.FC<HeaderProps> = ({
                       setActivePortal('admin');
                       setCurrentTab('dashboard');
                     }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer ${
                       activePortal === 'admin'
-                        ? 'bg-amber-600 text-white shadow-sm'
+                        ? 'bg-emerald-500/20 text-[#14e071] border border-emerald-500/35'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
                     <ShieldCheck className="w-3.5 h-3.5" />
                     Admin Portal
                     {pendingRequestsCount > 0 && (
-                      <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold animate-pulse">
+                      <span className="bg-amber-500 text-slate-950 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
                         {pendingRequestsCount}
                       </span>
                     )}
@@ -164,196 +175,95 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
 
-            {/* Desktop Navigation Links according to Portal */}
+            {/* Zone 2: Desktop User Navigation Links */}
             {activePortal === 'user' && currentUser && (
-              <div className="hidden lg:flex items-center gap-1">
-                <button
-                  onClick={() => setCurrentTab('dashboard')}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition cursor-pointer ${
-                    currentTab === 'dashboard'
-                      ? 'text-emerald-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Dashboard
-                </button>
-                <button
-                  onClick={() => setCurrentTab('predictions')}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition cursor-pointer ${
-                    currentTab === 'predictions'
-                      ? 'text-emerald-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Prediction Markets
-                </button>
-                <button
-                  onClick={() => setCurrentTab('history')}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition cursor-pointer ${
-                    currentTab === 'history'
-                      ? 'text-emerald-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  My Predictions
-                </button>
-                <button
-                  onClick={() => setCurrentTab('wallet')}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition cursor-pointer ${
-                    currentTab === 'wallet'
-                      ? 'text-emerald-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Wallet
-                </button>
-              </div>
+              <nav className="hidden lg:flex items-center gap-1">
+                {[
+                  { id: 'dashboard', label: 'Dashboard' },
+                  { id: 'predictions', label: 'Markets' },
+                  { id: 'history', label: 'My Predictions' },
+                  { id: 'wallet', label: 'Wallet' }
+                ].map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => setCurrentTab(item.id)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition cursor-pointer ${
+                      currentTab === item.id
+                        ? 'text-[#14e071] bg-emerald-500/10 border border-emerald-500/25'
+                        : 'text-slate-300 hover:text-white hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </nav>
             )}
 
-            {activePortal === 'admin' && adminUser && (
-              <div className="hidden lg:flex items-center gap-1">
-                <button
-                  onClick={() => setCurrentTab('dashboard')}
-                  className={`px-2.5 py-2 rounded-lg text-xs xl:text-sm font-medium transition cursor-pointer ${
-                    currentTab === 'dashboard'
-                      ? 'text-amber-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Overview
-                </button>
-                <button
-                  onClick={() => setCurrentTab('users')}
-                  className={`px-2.5 py-2 rounded-lg text-xs xl:text-sm font-medium transition cursor-pointer ${
-                    currentTab === 'users'
-                      ? 'text-amber-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Users
-                </button>
-                <button
-                  onClick={() => setCurrentTab('coins')}
-                  className={`px-2.5 py-2 rounded-lg text-xs xl:text-sm font-medium transition cursor-pointer ${
-                    currentTab === 'coins'
-                      ? 'text-amber-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Coins
-                </button>
-                <button
-                  onClick={() => setCurrentTab('predictions')}
-                  className={`px-2.5 py-2 rounded-lg text-xs xl:text-sm font-medium transition cursor-pointer ${
-                    currentTab === 'predictions'
-                      ? 'text-amber-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Predictions
-                </button>
-                <button
-                  onClick={() => setCurrentTab('requests')}
-                  className={`px-2.5 py-2 rounded-lg text-xs xl:text-sm font-medium relative transition cursor-pointer ${
-                    currentTab === 'requests'
-                      ? 'text-amber-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Requests
-                  {pendingRequestsCount > 0 && (
-                    <span className="ml-1.5 bg-amber-500 text-slate-950 font-bold px-1.5 py-0.2 rounded-full text-xs">
-                      {pendingRequestsCount}
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => setCurrentTab('gateway')}
-                  className={`px-2.5 py-2 rounded-lg text-xs xl:text-sm font-medium transition cursor-pointer whitespace-nowrap ${
-                    currentTab === 'gateway'
-                      ? 'text-amber-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Payment Gateway
-                </button>
-                <button
-                  onClick={() => setCurrentTab('audit')}
-                  className={`px-2.5 py-2 rounded-lg text-xs xl:text-sm font-medium transition cursor-pointer ${
-                    currentTab === 'audit'
-                      ? 'text-amber-400 bg-slate-800'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  Audit Log
-                </button>
-              </div>
-            )}
-
-            {/* Right Action Area */}
-            <div className="flex items-center gap-2.5 sm:gap-3">
+            {/* Zone 3: Right Action Area */}
+            <div className="flex items-center gap-2.5 shrink-0">
               {activePortal === 'user' && currentUser && (
                 <>
-                  {/* Coin Wallet Button */}
-                  <div
+                  {/* Balance Pill */}
+                  <button
+                    type="button"
                     onClick={() => setCurrentTab('wallet')}
-                    className="cursor-pointer bg-slate-950/90 border border-slate-800 hover:border-emerald-500/50 px-2.5 sm:px-3 py-1.5 rounded-xl flex items-center gap-2 transition shadow-sm"
+                    className="cursor-pointer bg-[#0d161d] border border-emerald-500/25 hover:border-[#14e071]/60 px-2.5 sm:px-3 py-1.5 rounded-xl flex items-center gap-2 transition"
                   >
-                    <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                      🪙
+                    <div className="w-6 h-6 rounded-full bg-amber-400/15 border border-amber-400/35 flex items-center justify-center">
+                      <Coins className="w-3.5 h-3.5 text-amber-400" />
                     </div>
                     <div className="flex flex-col text-left">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 leading-none">Balance</span>
-                      <span className="font-mono-numbers font-bold text-sm text-emerald-400 leading-tight">
+                      <span className="text-[10px] text-slate-400 leading-none">Balance</span>
+                      <span className="font-mono-numbers font-bold text-xs sm:text-sm text-white leading-tight">
                         {currentUser.coins.toLocaleString()}
                       </span>
                     </div>
-                  </div>
+                  </button>
 
-                  {/* Quick Deposit Button */}
+                  {/* + Deposit CTA */}
                   <button
                     onClick={onOpenDeposit}
-                    className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs shadow-md shadow-emerald-950/30 transition cursor-pointer"
+                    className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-xl apex-glow-btn font-bold text-xs whitespace-nowrap shrink-0 transition cursor-pointer"
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                     Deposit
                   </button>
 
-                  {/* User Dropdown */}
+                  {/* User Profile Dropdown */}
                   <div className="relative">
                     <button
                       onClick={() => setShowUserDropdown(!showUserDropdown)}
-                      className="flex items-center gap-2 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer"
+                      className="flex items-center gap-2 p-1.5 rounded-xl bg-[#0d161d] hover:bg-[#13202a] border border-white/[0.08] transition cursor-pointer"
                     >
-                      <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center font-bold text-sm border border-emerald-500/30">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/15 text-[#14e071] flex items-center justify-center font-bold text-xs border border-emerald-500/30">
                         {currentUser.username.substring(0, 2).toUpperCase()}
                       </div>
-                      <span className="hidden md:inline text-xs font-semibold text-slate-200">
+                      <span className="hidden md:inline text-xs font-semibold text-slate-200 max-w-[110px] truncate">
                         {currentUser.username}
                       </span>
                       <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                     </button>
 
                     {showUserDropdown && (
-                      <div className="absolute right-0 mt-2 w-56 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-2 z-50">
-                        <div className="px-3 py-2 border-b border-slate-800">
-                          <div className="font-bold text-sm text-white">{currentUser.fullName}</div>
-                          <div className="text-xs text-slate-400">@{currentUser.username}</div>
-                          <div className="mt-1 flex items-center justify-between text-xs font-mono text-emerald-400 bg-slate-950 px-2 py-1 rounded border border-slate-800">
-                            <span>Coins:</span>
-                            <span className="font-bold">{currentUser.coins.toLocaleString()} 🪙</span>
+                      <div className="absolute right-0 mt-2 w-56 bg-[#0d151b] border border-white/[0.1] rounded-2xl shadow-2xl p-2 z-50">
+                        <div className="px-3 py-2 border-b border-white/[0.07]">
+                          <div className="font-bold text-sm text-white truncate">{currentUser.fullName}</div>
+                          <div className="text-xs text-slate-400 truncate">@{currentUser.username}</div>
+                          <div className="mt-1.5 flex items-center justify-between text-xs font-mono-numbers text-[#14e071] bg-[#070d11] px-2.5 py-1.5 rounded-lg border border-white/[0.06]">
+                            <span>Coins</span>
+                            <span className="font-bold">{currentUser.coins.toLocaleString()}</span>
                           </div>
                         </div>
 
-                        <div className="py-1">
+                        <div className="py-1 space-y-0.5">
                           <button
                             onClick={() => {
                               setCurrentTab('dashboard');
                               setShowUserDropdown(false);
                             }}
-                            className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 rounded-lg flex items-center gap-2 cursor-pointer"
+                            className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-2 cursor-pointer"
                           >
-                            <Layers className="w-4 h-4 text-slate-400" />
+                            <LayoutDashboard className="w-4 h-4 text-[#14e071]" />
                             Dashboard
                           </button>
                           <button
@@ -361,7 +271,7 @@ export const Header: React.FC<HeaderProps> = ({
                               setCurrentTab('history');
                               setShowUserDropdown(false);
                             }}
-                            className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 rounded-lg flex items-center gap-2 cursor-pointer"
+                            className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-2 cursor-pointer"
                           >
                             <ArrowDownUp className="w-4 h-4 text-slate-400" />
                             My Predictions
@@ -371,9 +281,9 @@ export const Header: React.FC<HeaderProps> = ({
                               setCurrentTab('wallet');
                               setShowUserDropdown(false);
                             }}
-                            className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 rounded-lg flex items-center gap-2 cursor-pointer"
+                            className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-2 cursor-pointer"
                           >
-                            <Coins className="w-4 h-4 text-slate-400" />
+                            <Coins className="w-4 h-4 text-amber-400" />
                             Wallet & Withdraw
                           </button>
                           <button
@@ -381,20 +291,20 @@ export const Header: React.FC<HeaderProps> = ({
                               onOpenProfile?.();
                               setShowUserDropdown(false);
                             }}
-                            className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 rounded-lg flex items-center gap-2 cursor-pointer"
+                            className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-2 cursor-pointer"
                           >
-                            <KeyRound className="w-4 h-4 text-slate-400" />
-                            Change Password
+                            <UserIcon className="w-4 h-4 text-slate-400" />
+                            Profile & Password
                           </button>
                         </div>
 
-                        <div className="pt-1 border-t border-slate-800">
+                        <div className="pt-1 border-t border-white/[0.07]">
                           <button
                             onClick={() => {
                               logout();
                               setShowUserDropdown(false);
                             }}
-                            className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-2 cursor-pointer"
+                            className="w-full text-left px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 rounded-lg flex items-center gap-2 cursor-pointer"
                           >
                             <LogOut className="w-4 h-4" />
                             Log Out
@@ -411,14 +321,14 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     onClick={handleOpenAdminSecurity}
                     title="Manage Admin Password & Security"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-semibold transition cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-[#14e071] text-xs font-semibold whitespace-nowrap shrink-0 transition cursor-pointer"
                   >
                     <KeyRound className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Admin Security</span>
+                    <span className="hidden sm:inline">Security</span>
                   </button>
                   <button
                     onClick={logout}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-400 text-xs font-semibold border border-slate-700 transition cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#0d161d] hover:bg-rose-500/15 text-slate-300 hover:text-rose-400 text-xs font-semibold border border-white/[0.08] whitespace-nowrap shrink-0 transition cursor-pointer"
                   >
                     <LogOut className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Logout</span>
@@ -428,58 +338,28 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Mobile & Tablet Navigation Bar */}
-          {activePortal === 'user' && currentUser && (
-            <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto pb-2.5 pt-0.5 no-scrollbar">
-              {[
-                { id: 'dashboard', label: 'Dashboard' },
-                { id: 'predictions', label: 'Markets' },
-                { id: 'history', label: 'My Predictions' },
-                { id: 'wallet', label: 'Wallet' }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setCurrentTab(tab.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
-                    currentTab === tab.id
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-              <button
-                onClick={onOpenDeposit}
-                className="sm:hidden px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 cursor-pointer"
-              >
-                <Plus className="w-3 h-3" />
-                Deposit
-              </button>
-            </div>
-          )}
-
+          {/* Mobile & Tablet Navigation Bar for Admin */}
           {activePortal === 'admin' && adminUser && (
             <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto pb-2.5 pt-0.5 no-scrollbar">
               {[
-                { id: 'dashboard', label: 'Overview' },
+                { id: 'dashboard', label: 'Dashboard' },
                 { id: 'users', label: 'Users' },
+                { id: 'predictions', label: 'Markets' },
                 { id: 'coins', label: 'Coins' },
-                { id: 'predictions', label: 'Predictions' },
                 {
                   id: 'requests',
                   label: pendingRequestsCount > 0 ? `Requests (${pendingRequestsCount})` : 'Requests'
                 },
-                { id: 'gateway', label: 'Gateway / UPI' },
+                { id: 'gateway', label: 'Gateway' },
                 { id: 'audit', label: 'Audit' }
               ].map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setCurrentTab(tab.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition cursor-pointer ${
                     currentTab === tab.id
-                      ? 'bg-amber-600 text-slate-950'
-                      : 'bg-slate-800/80 text-slate-300 hover:text-white'
+                      ? 'bg-emerald-500/20 text-[#14e071] border border-emerald-500/35'
+                      : 'bg-[#0d161d] text-slate-300 hover:text-white border border-white/[0.06]'
                   }`}
                 >
                   {tab.label}
@@ -492,16 +372,16 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Admin Security / Password Update Modal */}
       {showAdminSecurity && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden text-xs">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/70">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-[#0d151b] border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden text-xs">
+            <div className="p-5 border-b border-white/[0.08] flex items-center justify-between bg-[#080e13]">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <ShieldCheck className="w-4 h-4 text-[#14e071]" />
                 <h3 className="font-bold text-sm text-white">Administrator Security Settings</h3>
               </div>
               <button
                 onClick={() => setShowAdminSecurity(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.06] transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -516,7 +396,7 @@ export const Header: React.FC<HeaderProps> = ({
                   minLength={3}
                   value={adminNewUsername}
                   onChange={e => setAdminNewUsername(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-white outline-none"
+                  className="w-full bg-[#070c10] border border-white/[0.1] focus:border-[#14e071] rounded-xl px-3 py-2 text-white outline-none"
                 />
               </div>
 
@@ -530,7 +410,7 @@ export const Header: React.FC<HeaderProps> = ({
                     value={adminCurrPass}
                     onChange={e => setAdminCurrPass(e.target.value)}
                     placeholder="Enter current admin password"
-                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl text-white outline-none"
+                    className="w-full pl-9 pr-3 py-2 bg-[#070c10] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-white outline-none"
                   />
                 </div>
               </div>
@@ -544,7 +424,7 @@ export const Header: React.FC<HeaderProps> = ({
                   value={adminNewPass}
                   onChange={e => setAdminNewPass(e.target.value)}
                   placeholder="Minimum 6 characters"
-                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-white outline-none"
+                  className="w-full bg-[#070c10] border border-white/[0.1] focus:border-[#14e071] rounded-xl px-3 py-2 text-white outline-none"
                 />
               </div>
 
@@ -557,7 +437,7 @@ export const Header: React.FC<HeaderProps> = ({
                   value={adminConfirmPass}
                   onChange={e => setAdminConfirmPass(e.target.value)}
                   placeholder="Re-enter new admin password"
-                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-white outline-none"
+                  className="w-full bg-[#070c10] border border-white/[0.1] focus:border-[#14e071] rounded-xl px-3 py-2 text-white outline-none"
                 />
               </div>
 
@@ -569,7 +449,7 @@ export const Header: React.FC<HeaderProps> = ({
               )}
 
               {adminSecSuccess && (
-                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 flex items-center gap-1.5">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[#14e071] flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
                   <span>{adminSecSuccess}</span>
                 </div>
@@ -579,13 +459,13 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowAdminSecurity(false)}
-                  className="w-1/3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition cursor-pointer"
+                  className="w-1/3 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-slate-300 font-semibold transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold uppercase tracking-wider transition cursor-pointer"
+                  className="flex-1 py-2.5 rounded-xl apex-glow-btn font-bold uppercase tracking-wider transition cursor-pointer"
                 >
                   Update Credentials
                 </button>

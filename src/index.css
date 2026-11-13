@@ -1,15 +1,28 @@
 @import "tailwindcss";
 
 @layer base {
+  :root {
+    --apex-bg: #060b0e;
+    --apex-surface: #0d151b;
+    --apex-surface-elevated: #111c24;
+    --apex-border: rgba(255, 255, 255, 0.08);
+    --apex-emerald: #14e071;
+    --apex-emerald-glow: rgba(20, 224, 113, 0.28);
+  }
+
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-    background-color: #0b0f19;
+    background-color: #060b0e;
+    background-image:
+      radial-gradient(circle at 18% 0%, rgba(20, 224, 113, 0.07), transparent 42%),
+      radial-gradient(circle at 85% 15%, rgba(16, 185, 129, 0.05), transparent 38%);
     color: #f1f5f9;
     overflow-x: hidden;
   }
-  
+
   .font-mono-numbers {
     font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
   }
 }
 
@@ -19,25 +32,57 @@
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: #070d11;
 }
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #1e2d38;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #2b4150;
 }
 
-/* Glassmorphism & glows */
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar,
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Signature Obsidian & Neon-Emerald Surfaces */
 .glass-panel {
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(12px);
+  background: rgba(13, 21, 27, 0.86);
+  backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.apex-card {
+  background: linear-gradient(180deg, rgba(16, 26, 33, 0.94) 0%, rgba(10, 17, 22, 0.96) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.65);
+}
+
+.apex-card-emerald {
+  background: linear-gradient(135deg, rgba(14, 48, 34, 0.9) 0%, rgba(11, 24, 21, 0.96) 55%, rgba(9, 17, 20, 0.98) 100%);
+  border: 1px solid rgba(20, 224, 113, 0.32);
+  box-shadow: 0 16px 38px -14px rgba(20, 224, 113, 0.22);
+}
+
+.apex-glow-btn {
+  background: linear-gradient(135deg, #16f27b 0%, #0ec964 100%);
+  color: #04130b;
+  box-shadow: 0 10px 26px -8px rgba(20, 224, 113, 0.55);
+}
+.apex-glow-btn:hover {
+  background: linear-gradient(135deg, #2bff8c 0%, #14e071 100%);
+  box-shadow: 0 12px 30px -6px rgba(20, 224, 113, 0.7);
+}
+
 .glow-emerald {
-  box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.25);
+  box-shadow: 0 0 28px -6px rgba(20, 224, 113, 0.35);
 }
 
 .glow-blue {

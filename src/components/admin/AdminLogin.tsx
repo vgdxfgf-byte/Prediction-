@@ -4,7 +4,8 @@ import { useApp } from '../../context/AppContext';
 import {
   ShieldCheck,
   AlertCircle,
-  KeyRound
+  KeyRound,
+  Crown
 } from 'lucide-react';
 
 interface AdminLoginProps {
@@ -41,28 +42,24 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onGoToUserApp }) => {
             initial={{ scale: 0.85, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.24, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
-            className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-500 mx-auto flex items-center justify-center shadow-lg shadow-amber-500/20"
+            className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400/20 to-amber-600/10 border border-amber-400/40 mx-auto flex items-center justify-center shadow-[0_10px_28px_-6px_rgba(245,158,11,0.45)]"
           >
-            <ShieldCheck className="w-8 h-8 text-slate-950 font-black" />
+            <Crown className="w-7 h-7 text-amber-400" />
           </motion.div>
           <h1 className="text-2xl font-black text-white tracking-tight">
-            ApexPredict Admin Console
+            APEX <span className="text-amber-400">ADMIN</span>
           </h1>
-          <p className="text-xs text-amber-400 font-semibold tracking-wide uppercase">
-            Restricted Management Access
-          </p>
+          <p className="text-xs text-slate-400">Control · Manage · Grow</p>
         </div>
 
         {/* Login Box */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-2xl space-y-5">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="apex-card rounded-2xl p-6 sm:p-7 space-y-5 border-amber-500/25">
+          <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
             <h2 className="font-bold text-sm text-white flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-amber-400" />
-              Administrator Authentication
+              <KeyRound className="w-4 h-4 text-[#14e071]" />
+              Administrator Sign In
             </h2>
-            <span className="text-[10px] uppercase font-bold text-amber-400 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">
-              Role: Admin
-            </span>
+            <span className="text-[11px] font-semibold text-amber-400">Verified Admin</span>
           </div>
 
           <p className="text-xs text-slate-400 leading-relaxed">
@@ -81,7 +78,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onGoToUserApp }) => {
             whileTap={{ scale: 0.98 }}
             disabled={isLoading}
             onClick={handleGoogleAdminLogin}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 disabled:opacity-60 text-slate-950 font-bold text-xs uppercase tracking-wider shadow-lg shadow-amber-950/50 flex items-center justify-center gap-2 transition cursor-pointer"
+            className="w-full py-3 rounded-xl apex-glow-btn disabled:opacity-60 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer"
           >
             <ShieldCheck className="w-4 h-4" />
             <span>{isLoading ? 'Authenticating...' : 'Sign In as Admin with Google'}</span>
@@ -92,7 +89,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onGoToUserApp }) => {
         <div className="text-center">
           <button
             onClick={onGoToUserApp}
-            className="text-xs text-slate-400 hover:text-slate-200 transition inline-flex items-center gap-1 cursor-pointer"
+            className="text-xs text-slate-400 hover:text-[#14e071] transition inline-flex items-center gap-1 cursor-pointer"
           >
             ← Return to User Prediction App
           </button>

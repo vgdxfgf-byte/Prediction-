@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { useApp } from '../../context/AppContext';
 import { Prediction, PredictionCategory } from '../../types';
-import { 
-  Search, 
-  Clock, 
-  CheckCircle2, 
-  XCircle, 
+import {
+  Search,
+  Clock,
+  CheckCircle2,
+  XCircle,
   Trophy,
-  Film
+  Film,
+  Activity
 } from 'lucide-react';
 
 interface PredictionsViewProps {
@@ -35,14 +36,10 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
 
   // Filter predictions
   const filteredPredictions = predictions.filter(p => {
-    // Category match
     if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
-
-    // Status filter
     if (statusFilter === 'open' && p.status !== 'open') return false;
     if (statusFilter === 'settled' && p.status !== 'settled') return false;
 
-    // Search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const matchTitle = p.title.toLowerCase().includes(q);
@@ -59,11 +56,9 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
       {/* Header & Search Bar */}
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <h2 className="text-xl font-black text-white flex items-center gap-2 tracking-tight">
             <span>Prediction Markets</span>
-            <span className="text-xs font-semibold text-emerald-400">
-              · Live Odds
-            </span>
+            <span className="text-xs font-semibold text-[#14e071]">· Live Odds</span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
             Pick YES or NO on Cricket matches, Movie box office & global events.
@@ -72,18 +67,18 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
 
         {/* Search Input */}
         <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+          <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
           <input
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search cricket, movies, teams, or questions..."
-            className="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
+            className="w-full pl-10 pr-4 py-2.5 bg-[#0d151b] border border-white/[0.08] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#14e071] transition"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-2.5 text-xs text-slate-500 hover:text-slate-300"
+              className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-white cursor-pointer"
             >
               Clear
             </button>
@@ -92,8 +87,7 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
       </div>
 
       {/* Category Tabs & Status Filter */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-        {/* Categories scrollable */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-white/[0.07] pb-4">
         <div className="flex items-center gap-1.5 overflow-x-auto w-full pb-1 sm:pb-0 scrollbar-none">
           {CATEGORIES.map(cat => {
             const isSelected = selectedCategory === cat;
@@ -101,17 +95,17 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
-                className={`relative px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer ${
+                className={`relative px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer ${
                   isSelected
-                    ? 'text-white'
-                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700'
+                    ? 'text-[#04130b] font-bold'
+                    : 'bg-[#0d151b] text-slate-400 hover:text-white border border-white/[0.07]'
                 }`}
               >
                 {isSelected && (
                   <motion.span
                     layoutId="predictionsCategoryTab"
                     transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                    className="absolute inset-0 rounded-xl bg-emerald-600 shadow-sm shadow-emerald-950/50"
+                    className="absolute inset-0 rounded-xl bg-[#14e071] shadow-[0_6px_18px_-6px_rgba(20,224,113,0.65)]"
                   />
                 )}
                 <span className="relative z-10 flex items-center gap-1.5">
@@ -125,27 +119,33 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
         </div>
 
         {/* Status Filter */}
-        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0 text-xs self-end sm:self-auto">
+        <div className="flex items-center gap-1 bg-[#0b1318] p-1 rounded-xl border border-white/[0.08] shrink-0 text-xs self-end sm:self-auto">
           <button
             onClick={() => setStatusFilter('open')}
-            className={`px-2.5 py-1 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
-              statusFilter === 'open' ? 'bg-slate-800 text-emerald-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            className={`px-2.5 py-1 rounded-lg font-semibold whitespace-nowrap transition cursor-pointer ${
+              statusFilter === 'open'
+                ? 'bg-emerald-500/15 text-[#14e071]'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
-            Open Markets
+            Open
           </button>
           <button
             onClick={() => setStatusFilter('settled')}
-            className={`px-2.5 py-1 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
-              statusFilter === 'settled' ? 'bg-slate-800 text-blue-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            className={`px-2.5 py-1 rounded-lg font-semibold whitespace-nowrap transition cursor-pointer ${
+              statusFilter === 'settled'
+                ? 'bg-sky-500/15 text-sky-400'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             Settled
           </button>
           <button
             onClick={() => setStatusFilter('all')}
-            className={`px-2.5 py-1 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
-              statusFilter === 'all' ? 'bg-slate-800 text-white font-semibold' : 'text-slate-400 hover:text-slate-200'
+            className={`px-2.5 py-1 rounded-lg font-semibold whitespace-nowrap transition cursor-pointer ${
+              statusFilter === 'all'
+                ? 'bg-white/[0.1] text-white'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             All
@@ -155,8 +155,8 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
 
       {/* Markets Grid */}
       {filteredPredictions.length === 0 ? (
-        <div className="bg-slate-900/60 rounded-2xl border border-slate-800 p-12 text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
+        <div className="apex-card rounded-2xl p-12 text-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-white/[0.05] text-[#14e071] mx-auto flex items-center justify-center">
             <Search className="w-6 h-6" />
           </div>
           <h3 className="font-bold text-slate-200 text-base">No Predictions Found</h3>
@@ -173,8 +173,9 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
             const isPaused = pred.status === 'paused';
             const isOpen = pred.status === 'open' && !isClosed;
 
-            // Check if current user already placed bets on this
-            const userExistingBets = currentUser ? bets.filter(b => b.userId === currentUser.id && b.predictionId === pred.id) : [];
+            const userExistingBets = currentUser
+              ? bets.filter(b => b.userId === currentUser.id && b.predictionId === pred.id)
+              : [];
 
             return (
               <motion.div
@@ -187,135 +188,124 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
                   delay: Math.min(idx * 0.04, 0.24),
                   ease: [0.16, 1, 0.3, 1]
                 }}
-                className="bg-slate-900/90 rounded-2xl border border-slate-800 hover:border-slate-700 p-5 flex flex-col justify-between transition-colors duration-200 shadow-lg relative group"
+                className="apex-card hover:border-emerald-500/40 rounded-2xl p-5 flex flex-col justify-between transition-colors duration-200 relative group"
               >
-                {/* Card Top: Category, Match context, Status */}
                 <div>
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="flex items-center gap-1.5 font-semibold text-[11px] text-slate-300">
-                      {pred.category === 'Cricket' && <Trophy className="w-3.5 h-3.5 text-emerald-400" />}
-                      {pred.category === 'Movies' && <Film className="w-3.5 h-3.5 text-purple-400" />}
-                      <span>{pred.category}</span>
+                  <div className="flex items-center justify-between text-xs mb-2.5 gap-2">
+                    <span className="flex items-center gap-1.5 font-semibold text-[11px] text-slate-300 min-w-0">
+                      {pred.category === 'Cricket' ? (
+                        <Trophy className="w-3.5 h-3.5 text-[#14e071] shrink-0" />
+                      ) : pred.category === 'Movies' ? (
+                        <Film className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                      ) : (
+                        <Activity className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      )}
+                      <span className="truncate">{pred.subtitle || pred.category}</span>
                     </span>
 
-                    {/* Status Pill */}
-                    {isOpen && (
-                      <span className="text-emerald-400 text-[10px] font-semibold">
-                        Open
-                      </span>
-                    )}
-                    {isPaused && (
-                      <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-semibold">
-                        Paused
-                      </span>
-                    )}
+                    {isOpen && <span className="text-[#14e071] text-[10px] font-bold shrink-0">Live</span>}
+                    {isPaused && <span className="text-amber-400 text-[10px] font-bold shrink-0">Paused</span>}
                     {isClosed && !isSettled && (
-                      <span className="px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-300 text-[10px] font-semibold">
-                        Closed (Settling)
-                      </span>
+                      <span className="text-slate-400 text-[10px] font-semibold shrink-0">Settling</span>
                     )}
                     {isSettled && (
-                      <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-semibold">
-                        Settled: {pred.outcome} Won
+                      <span className="text-sky-400 text-[10px] font-bold shrink-0">
+                        {pred.outcome} Won
                       </span>
                     )}
                   </div>
 
-                  {/* Subtitle / Match title */}
-                  <div className="text-[11px] text-slate-400 font-medium mb-1">
-                    {pred.subtitle}
-                  </div>
-
-                  {/* Question */}
-                  <h3 className="font-bold text-base text-slate-100 group-hover:text-emerald-300 transition-colors leading-snug">
+                  <h3 className="font-bold text-base text-white group-hover:text-[#14e071] transition-colors leading-snug">
                     {pred.title}
                   </h3>
 
                   {pred.description && (
-                    <p className="text-xs text-slate-500 mt-2 line-clamp-2">
-                      {pred.description}
-                    </p>
+                    <p className="text-xs text-slate-400 mt-1.5 line-clamp-2">{pred.description}</p>
                   )}
                 </div>
 
-                {/* Card Mid: User Existing Bets if any */}
                 {userExistingBets.length > 0 && (
-                  <div className="my-3 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs flex items-center justify-between">
-                    <span className="text-slate-400">Your Prediction:</span>
-                    <div className="flex items-center gap-1.5">
+                  <div className="my-3 px-3 py-2 rounded-xl bg-[#070c10] border border-white/[0.06] text-xs flex items-center justify-between">
+                    <span className="text-slate-400">Your Pick:</span>
+                    <div className="flex items-center gap-1.5 font-mono-numbers">
                       {userExistingBets.map(b => (
                         <span
                           key={b.id}
-                          className={`font-bold px-1.5 py-0.5 rounded text-[10px] ${
-                            b.choice === 'YES' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                          className={`font-bold text-[11px] ${
+                            b.choice === 'YES' ? 'text-[#14e071]' : 'text-rose-400'
                           }`}
                         >
-                          {b.choice} ({b.amount} 🪙)
+                          {b.choice} ({b.amount})
                         </span>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Card Bottom: Closing time & Odds buttons */}
-                <div className="mt-4 pt-3 border-t border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <div className="mt-4 pt-3 border-t border-white/[0.06] space-y-3">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono-numbers">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-slate-500" />
-                      Closes: {closeDate.toLocaleDateString([], { month: 'short', day: 'numeric' })} at {closeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {closeDate.toLocaleDateString([], { month: 'short', day: 'numeric' })},{' '}
+                      {closeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                     <span>
-                      Limits: <strong className="text-slate-300 font-mono">{pred.minBet}-{pred.maxBet}</strong> 🪙
+                      {pred.minBet}–{pred.maxBet} coins
                     </span>
                   </div>
 
-                  {/* YES / NO Options with Odds */}
                   {isOpen ? (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-2.5">
                       <motion.button
+                        whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.96 }}
                         onClick={() => onSelectPrediction(pred, 'YES')}
-                        className="py-2.5 px-3 rounded-xl bg-slate-950 hover:bg-emerald-950/50 border border-emerald-500/40 hover:border-emerald-500 text-emerald-300 font-bold text-xs flex items-center justify-between transition cursor-pointer group/btn shadow-sm"
+                        className="py-2.5 px-3 rounded-xl bg-emerald-950/55 hover:bg-emerald-900/70 border border-[#14e071]/40 hover:border-[#14e071] font-bold text-xs flex items-center justify-between transition cursor-pointer"
                       >
-                        <div className="flex items-center gap-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <div className="flex items-center gap-1.5 text-[#14e071]">
+                          <CheckCircle2 className="w-4 h-4" />
                           <span>YES</span>
                         </div>
-                        <span className="font-mono bg-emerald-500/20 px-2 py-0.5 rounded text-[11px] font-bold text-emerald-300">
+                        <span className="font-mono-numbers font-extrabold text-white">
                           {pred.yesOdds.toFixed(2)}x
                         </span>
                       </motion.button>
 
                       <motion.button
+                        whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.96 }}
                         onClick={() => onSelectPrediction(pred, 'NO')}
-                        className="py-2.5 px-3 rounded-xl bg-slate-950 hover:bg-rose-950/50 border border-rose-500/40 hover:border-rose-500 text-rose-300 font-bold text-xs flex items-center justify-between transition cursor-pointer group/btn shadow-sm"
+                        className="py-2.5 px-3 rounded-xl bg-rose-950/45 hover:bg-rose-900/65 border border-rose-500/35 hover:border-rose-400 font-bold text-xs flex items-center justify-between transition cursor-pointer"
                       >
-                        <div className="flex items-center gap-1.5">
-                          <XCircle className="w-3.5 h-3.5 text-rose-400" />
+                        <div className="flex items-center gap-1.5 text-rose-400">
+                          <XCircle className="w-4 h-4" />
                           <span>NO</span>
                         </div>
-                        <span className="font-mono bg-rose-500/20 px-2 py-0.5 rounded text-[11px] font-bold text-rose-300">
+                        <span className="font-mono-numbers font-extrabold text-white">
                           {pred.noOdds.toFixed(2)}x
                         </span>
                       </motion.button>
                     </div>
                   ) : (
-                    /* Settled or Closed State */
-                    <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 text-center">
+                    <div className="bg-[#070c10] p-2.5 rounded-xl border border-white/[0.06] text-center">
                       {isSettled ? (
                         <div className="text-xs">
-                          <span className="text-slate-400">Winning Outcome: </span>
-                          <span className={`font-black uppercase px-2 py-0.5 rounded ${
-                            pred.outcome === 'YES' ? 'bg-emerald-500/20 text-emerald-400' :
-                            pred.outcome === 'NO' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-700 text-slate-300'
-                          }`}>
+                          <span className="text-slate-400">Outcome: </span>
+                          <span
+                            className={`font-black uppercase ${
+                              pred.outcome === 'YES'
+                                ? 'text-[#14e071]'
+                                : pred.outcome === 'NO'
+                                  ? 'text-rose-400'
+                                  : 'text-slate-300'
+                            }`}
+                          >
                             {pred.outcome} WON
                           </span>
                         </div>
                       ) : (
                         <div className="text-xs text-slate-400">
-                          {isPaused ? 'Betting is temporarily paused by admin' : 'Market closed for betting. Result pending.'}
+                          {isPaused ? 'Market paused by admin' : 'Market closed. Result pending.'}
                         </div>
                       )}
                     </div>
@@ -323,19 +313,19 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
 
                   {/* Volume bar */}
                   <div className="space-y-1">
-                    <div className="flex justify-between text-[10px] text-slate-500">
-                      <span>YES Vol: {pred.totalYesVolume.toLocaleString()} 🪙</span>
-                      <span>NO Vol: {pred.totalNoVolume.toLocaleString()} 🪙</span>
+                    <div className="flex justify-between text-[10px] text-slate-500 font-mono-numbers">
+                      <span>YES: {pred.totalYesVolume.toLocaleString()}</span>
+                      <span>NO: {pred.totalNoVolume.toLocaleString()}</span>
                     </div>
                     {pred.totalYesVolume + pred.totalNoVolume > 0 && (
-                      <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden flex">
-                        <div 
-                          className="bg-emerald-500 h-full transition-all"
+                      <div className="h-1.5 w-full bg-white/[0.06] rounded-full overflow-hidden flex">
+                        <div
+                          className="bg-[#14e071] h-full transition-all"
                           style={{
                             width: `${(pred.totalYesVolume / (pred.totalYesVolume + pred.totalNoVolume)) * 100}%`
                           }}
                         />
-                        <div 
+                        <div
                           className="bg-rose-500 h-full transition-all"
                           style={{
                             width: `${(pred.totalNoVolume / (pred.totalYesVolume + pred.totalNoVolume)) * 100}%`

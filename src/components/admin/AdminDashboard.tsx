@@ -1,23 +1,26 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { motion } from 'motion/react';
 import { useApp } from '../../context/AppContext';
-import { 
-  Users, 
-  Coins, 
-  ArrowDownLeft, 
-  ArrowUpRight, 
-  Layers, 
-  Trophy, 
-  TrendingDown, 
-  Clock, 
-  Plus, 
-  ShieldCheck, 
+import {
+  Users,
+  Coins,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Layers,
+  Trophy,
+  TrendingDown,
+  Clock,
+  Plus,
   Activity,
   History,
   MessageCircle,
   Save,
   CheckCircle2,
   AlertTriangle,
-  Landmark
+  Landmark,
+  Crown,
+  UserPlus,
+  ChevronRight
 } from 'lucide-react';
 import { PaymentGatewayEditor } from './PaymentGatewayEditor';
 
@@ -46,6 +49,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     whatsappSupport,
     updateWhatsAppSupport
   } = useApp();
+
+  const [chartWindow, setChartWindow] = useState<7 | 14>(7);
+  const [hoveredDayIdx, setHoveredDayIdx] = useState<number | null>(null);
 
   const [waEnabled, setWaEnabled] = useState(whatsappSupport.enabled);
   const [waPhone, setWaPhone] = useState(whatsappSupport.phoneNumber);
@@ -92,293 +98,641 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const lostBetsCount = bets.filter(b => b.result === 'lost').length;
   const pendingBetsCount = bets.filter(b => b.result === 'pending').length;
 
+  const totalDepositsVolume = deposits.reduce((sum, d) => sum + d.amount, 0);
+  const totalWithdrawalsVolume = withdrawals.reduce((sum, w) => sum + w.amount, 0);
+
+  // Build real Platform Overview time-series from exchange events
+  const chartData = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const buckets: { label: string; fullDate: string; volume: number; count: number }[] = [];
+    for (let i = chartWindow - 1; i >= 0; i--) {
+      const d = new Date(today.getTime() - i * 86400000);
+      buckets.push({
+        label: d.toLocaleDateString([], { weekday: 'short' }),
+        fullDate: d.toLocaleDateString([], { month: 'short', day: 'numeric' }),
+        volume: 0,
+        count: 0
+      });
+    }
+
+    const addEvent = (iso: string | undefined, amount: number) => {
+      if (!iso) return;
+      const t = new Date(iso);
+      if (Number.isNaN(t.getTime())) return;
+      t.setHours(0, 0, 0, 0);
+      const diffDays = Math.round((today.getTime() - t.getTime()) / 86400000);
+      const idx = chartWindow - 1 - diffDays;
+      if (idx >= 0 && idx < buckets.length) {
+        buckets[idx].volume += Math.abs(amount);
+        buckets[idx].count += 1;
+      }
+    };
+
+    bets.forEach(b => addEvent(b.createdAt, b.amount));
+    deposits.forEach(d => addEvent(d.createdAt, d.amount));
+    withdrawals.forEach(w => addEvent(w.createdAt, w.amount));
+    coinLogs.forEach(l => addEvent(l.createdAt, l.amount));
+
+    return buckets;
+  }, [bets, deposits, withdrawals, coinLogs, chartWindow]);
+
+  // SVG chart coordinate math
+  const svgW = 540;
+  const svgH = 175;
+  const padX = 24;
+  const padY = 20;
+  const maxVol = Math.max(100, ...chartData.map(d => d.volume));
+
+  const points = chartData.map((d, i) => {
+    const x =
+      chartData.length > 1
+        ? padX + (i / (chartData.length - 1)) * (svgW - padX * 2)
+        : svgW / 2;
+    const y = svgH - padY - (d.volume / maxVol) * (svgH - padY * 2);
+    return { x, y, ...d };
+  });
+
+  const linePath = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(' ');
+  const areaPath =
+    points.length > 0
+      ? `${linePath} L ${points[points.length - 1].x.toFixed(1)} ${(svgH - padY).toFixed(1)} L ${points[0].x.toFixed(1)} ${(svgH - padY).toFixed(1)} Z`
+      : '';
+
+  // Unified Recent Activities feed (Screen 3 style)
+  const recentActivities = useMemo(() => {
+    const items: {
+      id: string;
+      kind: 'deposit' | 'withdrawal' | 'user' | 'adjustment';
+      title: string;
+      time: string;
+      ts: number;
+      amountLabel?: string;
+      positive?: boolean;
+    }[] = [];
+
+    deposits.slice(0, 4).forEach(d => {
+      items.push({
+        id: `dep-${d.id}`,
+        kind: 'deposit',
+        title: `Deposit by @${d.username}`,
+        time: new Date(d.createdAt).toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        ts: new Date(d.createdAt).getTime(),
+        amountLabel: `+${d.amount.toLocaleString()}`,
+        positive: true
+      });
+    });
+
+    withdrawals.slice(0, 4).forEach(w => {
+      items.push({
+        id: `wdr-${w.id}`,
+        kind: 'withdrawal',
+        title: `Withdrawal by @${w.username}`,
+        time: new Date(w.createdAt).toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        ts: new Date(w.createdAt).getTime(),
+        amountLabel: `-${w.amount.toLocaleString()}`,
+        positive: false
+      });
+    });
+
+    regularUsers.slice(0, 3).forEach(u => {
+      items.push({
+        id: `usr-${u.id}`,
+        kind: 'user',
+        title: `Player @${u.username} active`,
+        time: new Date(u.createdAt).toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        ts: new Date(u.createdAt).getTime()
+      });
+    });
+
+    return items.sort((a, b) => b.ts - a.ts).slice(0, 5);
+  }, [deposits, withdrawals, regularUsers]);
+
+  const activePoint = hoveredDayIdx !== null ? points[hoveredDayIdx] : null;
+
   return (
     <div className="space-y-6">
-      {/* Top Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950/70 p-6 rounded-2xl border border-slate-800 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              Master Control Panel
-            </span>
-            <span className="text-xs text-slate-400">Live Exchange Risk Engine</span>
+      {/* Top Header Banner (Screen 3 aesthetic) */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+        className="apex-card rounded-2xl p-5 sm:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative overflow-hidden"
+      >
+        <div className="absolute right-0 top-0 bottom-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(20,224,113,0.12),transparent_70%)] pointer-events-none" />
+
+        <div className="relative z-10">
+          <div className="flex items-center gap-2 text-xs text-amber-400 font-semibold mb-1">
+            <Crown className="w-4 h-4" />
+            <span>Master Control Panel</span>
+            <span className="text-slate-500">·</span>
+            <span className="text-[#14e071]">Live Exchange</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
             Exchange Administration
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-xl">
-            Control prediction markets, set odds, manage player coin balances, approve financial requests, and monitor audit trails.
+            Monitor platform volume, manage user wallets, publish Cricket & Movie markets, and process requests in real time.
           </p>
         </div>
 
-        {/* Quick Admin Actions */}
-        <div className="flex flex-wrap items-center gap-2">
-          <button
+        <div className="relative z-10 flex flex-wrap items-center gap-2.5">
+          <motion.button
+            whileTap={{ scale: 0.97 }}
             onClick={onOpenCreateUser}
-            className="px-3.5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-md transition cursor-pointer"
+            className="px-4 py-2.5 rounded-xl apex-glow-btn font-bold text-xs flex items-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
-            Create User Account
-          </button>
-          <button
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            Create User
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
             onClick={onOpenCreatePrediction}
-            className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider border border-slate-700 flex items-center gap-1.5 transition cursor-pointer"
+            className="px-4 py-2.5 rounded-xl bg-[#111c24] hover:bg-[#172631] text-white font-bold text-xs border border-white/[0.1] flex items-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 text-[#14e071]" />
             New Prediction
-          </button>
+          </motion.button>
         </div>
-      </div>
+      </motion.div>
 
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
-        {/* Total Users */}
-        <div 
+      {/* Screen 3 Signature 4 Colored-Glass KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {/* Total Users (Sky Blue tint) */}
+        <motion.button
+          type="button"
+          whileHover={{ y: -2 }}
           onClick={() => onNavigateTab('users')}
-          className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 hover:border-amber-500/40 cursor-pointer transition shadow-sm space-y-1"
+          className="text-left rounded-2xl p-5 bg-gradient-to-br from-sky-950/60 via-[#0d1822] to-[#0b1217] border border-sky-500/25 hover:border-sky-400/50 transition cursor-pointer shadow-lg"
         >
-          <div className="flex justify-between items-center text-xs text-slate-400">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Total Users</span>
-            <Users className="w-4 h-4 text-blue-400" />
+          <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center mb-3">
+            <Users className="w-5 h-5 text-sky-400" />
           </div>
-          <div className="font-mono-numbers text-2xl font-black text-white">
-            {stats.totalUsers}
+          <div className="text-xs text-slate-300 font-medium">Total Users</div>
+          <div className="font-mono-numbers text-2xl sm:text-3xl font-black text-white mt-1">
+            {stats.totalUsers.toLocaleString()}
           </div>
-          <div className="flex items-center gap-2 text-[10px] text-slate-400 pt-1">
-            <span className="text-emerald-400 font-semibold">{stats.activeUsers} Active</span>
-            <span>•</span>
+          <div className="text-[11px] text-slate-400 mt-1.5 flex items-center gap-2">
+            <span className="text-[#14e071] font-semibold">{stats.activeUsers} Active</span>
+            <span>·</span>
             <span className="text-rose-400 font-semibold">{stats.suspendedUsers} Suspended</span>
           </div>
-        </div>
+        </motion.button>
 
-        {/* Total Coins in Circulation */}
-        <div 
+        {/* Total Coins (Emerald/Gold tint) */}
+        <motion.button
+          type="button"
+          whileHover={{ y: -2 }}
           onClick={() => onNavigateTab('coins')}
-          className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 hover:border-amber-500/40 cursor-pointer transition shadow-sm space-y-1"
+          className="text-left rounded-2xl p-5 bg-gradient-to-br from-emerald-950/60 via-[#0d1b18] to-[#0b1217] border border-[#14e071]/30 hover:border-[#14e071]/60 transition cursor-pointer shadow-lg"
         >
-          <div className="flex justify-between items-center text-xs text-slate-400">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Coins In Circulation</span>
-            <Coins className="w-4 h-4 text-amber-400" />
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/35 flex items-center justify-center mb-3">
+            <Coins className="w-5 h-5 text-amber-400" />
           </div>
-          <div className="font-mono-numbers text-2xl font-black text-amber-400">
+          <div className="text-xs text-slate-300 font-medium">Total Coins</div>
+          <div className="font-mono-numbers text-2xl sm:text-3xl font-black text-white mt-1">
             {stats.totalCoinsInCirculation.toLocaleString()}
           </div>
-          <div className="text-[10px] text-slate-400 pt-1">
+          <div className="text-[11px] text-slate-400 mt-1.5">
             Across {regularUsers.length} player wallets
           </div>
+        </motion.button>
+
+        {/* Total Deposits (Violet tint) */}
+        <motion.button
+          type="button"
+          whileHover={{ y: -2 }}
+          onClick={() => onNavigateTab('requests')}
+          className="text-left rounded-2xl p-5 bg-gradient-to-br from-violet-950/60 via-[#141322] to-[#0b1217] border border-violet-500/25 hover:border-violet-400/50 transition cursor-pointer shadow-lg"
+        >
+          <div className="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-400/35 flex items-center justify-center mb-3">
+            <ArrowDownLeft className="w-5 h-5 text-violet-400" />
+          </div>
+          <div className="text-xs text-slate-300 font-medium">Total Deposits</div>
+          <div className="font-mono-numbers text-2xl sm:text-3xl font-black text-white mt-1">
+            {totalDepositsVolume.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-violet-300 font-semibold mt-1.5">
+            {stats.pendingDepositsCount} pending ({stats.pendingDepositsAmount.toLocaleString()} coins)
+          </div>
+        </motion.button>
+
+        {/* Total Withdrawals (Amber tint) */}
+        <motion.button
+          type="button"
+          whileHover={{ y: -2 }}
+          onClick={() => onNavigateTab('requests')}
+          className="text-left rounded-2xl p-5 bg-gradient-to-br from-amber-950/55 via-[#1b1610] to-[#0b1217] border border-amber-500/25 hover:border-amber-400/50 transition cursor-pointer shadow-lg"
+        >
+          <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/35 flex items-center justify-center mb-3">
+            <ArrowUpRight className="w-5 h-5 text-amber-400" />
+          </div>
+          <div className="text-xs text-slate-300 font-medium">Total Withdrawals</div>
+          <div className="font-mono-numbers text-2xl sm:text-3xl font-black text-white mt-1">
+            {totalWithdrawalsVolume.toLocaleString()}
+          </div>
+          <div className="text-[11px] text-amber-300 font-semibold mt-1.5">
+            {stats.pendingWithdrawalsCount} pending ({stats.pendingWithdrawalsAmount.toLocaleString()} coins)
+          </div>
+        </motion.button>
+      </div>
+
+      {/* Screen 3 Middle Row: Platform Overview Chart + Recent Activities */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Platform Overview Line/Area Chart (7 cols) */}
+        <div className="lg:col-span-7 apex-card rounded-2xl p-5 flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-sm text-white">Platform Overview</h3>
+              <p className="text-[11px] text-slate-400">
+                Daily coin volume across predictions, deposits & withdrawals
+              </p>
+            </div>
+
+            <div className="flex items-center gap-1 bg-[#070c10] p-1 rounded-xl border border-white/[0.08] text-[11px]">
+              <button
+                type="button"
+                onClick={() => setChartWindow(7)}
+                className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer ${
+                  chartWindow === 7
+                    ? 'bg-emerald-500/20 text-[#14e071]'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                7 Days
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartWindow(14)}
+                className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer ${
+                  chartWindow === 14
+                    ? 'bg-emerald-500/20 text-[#14e071]'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                14 Days
+              </button>
+            </div>
+          </div>
+
+          <div className="relative">
+            {activePoint && (
+              <div className="mb-2 flex items-center justify-between px-3 py-1.5 rounded-lg bg-[#070c10] border border-[#14e071]/30 text-xs">
+                <span className="text-slate-300 font-medium">{activePoint.fullDate}</span>
+                <span className="font-mono-numbers font-bold text-[#14e071]">
+                  {activePoint.volume.toLocaleString()} coins ({activePoint.count} events)
+                </span>
+              </div>
+            )}
+
+            <svg
+              viewBox={`0 0 ${svgW} ${svgH}`}
+              className="w-full h-44 overflow-visible"
+              role="img"
+              aria-label="Platform activity overview chart"
+            >
+              <defs>
+                <linearGradient id="apexChartFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#14e071" stopOpacity="0.32" />
+                  <stop offset="100%" stopColor="#14e071" stopOpacity="0.0" />
+                </linearGradient>
+              </defs>
+
+              {/* Subtle horizontal grid lines */}
+              {[0.25, 0.5, 0.75, 1].map((ratio, idx) => {
+                const y = padY + ratio * (svgH - padY * 2);
+                return (
+                  <line
+                    key={idx}
+                    x1={padX}
+                    y1={y}
+                    x2={svgW - padX}
+                    y2={y}
+                    stroke="rgba(255,255,255,0.06)"
+                    strokeDasharray="4 4"
+                  />
+                );
+              })}
+
+              {areaPath && <path d={areaPath} fill="url(#apexChartFill)" />}
+
+              {linePath && (
+                <path
+                  d={linePath}
+                  fill="none"
+                  stroke="#14e071"
+                  strokeWidth="2.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              )}
+
+              {points.map((p, idx) => (
+                <g
+                  key={idx}
+                  onMouseEnter={() => setHoveredDayIdx(idx)}
+                  onMouseLeave={() => setHoveredDayIdx(null)}
+                  className="cursor-pointer"
+                >
+                  <circle cx={p.x} cy={p.y} r="10" fill="transparent" />
+                  <circle
+                    cx={p.x}
+                    cy={p.y}
+                    r={hoveredDayIdx === idx ? 5.5 : 3.5}
+                    fill="#14e071"
+                    stroke="#060b0e"
+                    strokeWidth="2"
+                  />
+                  {(chartWindow === 7 || idx % 2 === 0) && (
+                    <text
+                      x={p.x}
+                      y={svgH - 2}
+                      textAnchor="middle"
+                      className="fill-slate-400 text-[10px]"
+                    >
+                      {p.label}
+                    </text>
+                  )}
+                </g>
+              ))}
+            </svg>
+          </div>
         </div>
 
-        {/* Pending Deposits */}
-        <div 
-          onClick={() => onNavigateTab('requests')}
-          className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 hover:border-amber-500/40 cursor-pointer transition shadow-sm space-y-1"
-        >
-          <div className="flex justify-between items-center text-xs text-slate-400">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Pending Deposits</span>
-            <ArrowDownLeft className="w-4 h-4 text-emerald-400" />
+        {/* Recent Activities Feed (5 cols, Screen 3 style) */}
+        <div className="lg:col-span-5 apex-card rounded-2xl p-5 flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm text-white">Recent Activities</h3>
+            <button
+              onClick={() => onNavigateTab('audit')}
+              className="text-xs font-semibold text-[#14e071] hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+            >
+              View All
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           </div>
-          <div className="font-mono-numbers text-2xl font-black text-emerald-400">
-            {stats.pendingDepositsAmount.toLocaleString()} 🪙
-          </div>
-          <div className="text-[10px] text-emerald-400/80 font-semibold pt-1">
-            {stats.pendingDepositsCount} requests requiring review
-          </div>
-        </div>
 
-        {/* Pending Withdrawals */}
-        <div 
-          onClick={() => onNavigateTab('requests')}
-          className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 hover:border-amber-500/40 cursor-pointer transition shadow-sm space-y-1"
-        >
-          <div className="flex justify-between items-center text-xs text-slate-400">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Pending Withdrawals</span>
-            <ArrowUpRight className="w-4 h-4 text-purple-400" />
-          </div>
-          <div className="font-mono-numbers text-2xl font-black text-purple-400">
-            {stats.pendingWithdrawalsAmount.toLocaleString()} 🪙
-          </div>
-          <div className="text-[10px] text-purple-400/80 font-semibold pt-1">
-            {stats.pendingWithdrawalsCount} requests awaiting payout
-          </div>
+          {recentActivities.length === 0 ? (
+            <div className="py-10 text-center text-slate-400 text-xs">
+              No recent activity recorded yet.
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {recentActivities.map(item => (
+                <div
+                  key={item.id}
+                  className="p-3 rounded-xl bg-[#070c10] border border-white/[0.06] flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                        item.kind === 'deposit'
+                          ? 'bg-emerald-500/15 text-[#14e071]'
+                          : item.kind === 'withdrawal'
+                            ? 'bg-rose-500/15 text-rose-400'
+                            : 'bg-sky-500/15 text-sky-400'
+                      }`}
+                    >
+                      {item.kind === 'deposit' ? (
+                        <ArrowDownLeft className="w-4 h-4" />
+                      ) : item.kind === 'withdrawal' ? (
+                        <ArrowUpRight className="w-4 h-4" />
+                      ) : (
+                        <UserPlus className="w-4 h-4" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-white truncate">{item.title}</div>
+                      <div className="text-[10px] text-slate-500 font-mono-numbers">{item.time}</div>
+                    </div>
+                  </div>
+
+                  {item.amountLabel && (
+                    <span
+                      className={`font-mono-numbers font-bold text-xs shrink-0 ${
+                        item.positive ? 'text-[#14e071]' : 'text-rose-400'
+                      }`}
+                    >
+                      {item.amountLabel}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Row 2: Prediction Metrics */}
+      {/* Market Operations Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
-        <div 
+        <button
+          type="button"
           onClick={() => onNavigateTab('predictions')}
-          className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 hover:border-amber-500/40 cursor-pointer transition shadow-sm space-y-1"
+          className="text-left apex-card p-4 rounded-xl hover:border-[#14e071]/40 cursor-pointer transition space-y-1"
         >
           <div className="flex justify-between items-center text-xs text-slate-400">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Total Predictions</span>
-            <Layers className="w-4 h-4 text-cyan-400" />
+            <span className="font-semibold text-[11px]">Open Markets</span>
+            <Layers className="w-4 h-4 text-[#14e071]" />
           </div>
           <div className="font-mono-numbers text-2xl font-black text-white">
             {stats.totalPredictions}
           </div>
-          <div className="text-[10px] text-cyan-400 font-semibold pt-1">
-            {stats.openPredictions} Currently Open Markets
+          <div className="text-[11px] text-[#14e071] font-semibold">
+            {stats.openPredictions} active right now
           </div>
-        </div>
+        </button>
 
-        <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 shadow-sm space-y-1">
+        <div className="apex-card p-4 rounded-xl space-y-1">
           <div className="flex justify-between items-center text-xs text-slate-400">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Winning Predictions</span>
-            <Trophy className="w-4 h-4 text-emerald-400" />
+            <span className="font-semibold text-[11px]">Winning Picks</span>
+            <Trophy className="w-4 h-4 text-[#14e071]" />
           </div>
-          <div className="font-mono-numbers text-2xl font-black text-emerald-400">
+          <div className="font-mono-numbers text-2xl font-black text-[#14e071]">
             {wonBetsCount}
           </div>
-          <div className="text-[10px] text-slate-400 pt-1">
-            Payouts: {stats.totalWonPayouts.toLocaleString()} 🪙
+          <div className="text-[11px] text-slate-400 font-mono-numbers">
+            Payouts: {stats.totalWonPayouts.toLocaleString()}
           </div>
         </div>
 
-        <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 shadow-sm space-y-1">
+        <div className="apex-card p-4 rounded-xl space-y-1">
           <div className="flex justify-between items-center text-xs text-slate-400">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Losing Predictions</span>
+            <span className="font-semibold text-[11px]">Losing Picks</span>
             <TrendingDown className="w-4 h-4 text-rose-400" />
           </div>
           <div className="font-mono-numbers text-2xl font-black text-rose-400">
             {lostBetsCount}
           </div>
-          <div className="text-[10px] text-slate-400 pt-1">
-            Absorbed into exchange
-          </div>
+          <div className="text-[11px] text-slate-400">Settled to exchange</div>
         </div>
 
-        <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 shadow-sm space-y-1">
+        <div className="apex-card p-4 rounded-xl space-y-1">
           <div className="flex justify-between items-center text-xs text-slate-400">
-            <span className="font-semibold uppercase tracking-wider text-[10px]">Pending Outcome Bets</span>
+            <span className="font-semibold text-[11px]">Pending Outcome</span>
             <Activity className="w-4 h-4 text-amber-400" />
           </div>
           <div className="font-mono-numbers text-2xl font-black text-amber-400">
             {pendingBetsCount}
           </div>
-          <div className="text-[10px] text-slate-400 pt-1">
-            Volume: {stats.totalBetVolume.toLocaleString()} 🪙
+          <div className="text-[11px] text-slate-400 font-mono-numbers">
+            Volume: {stats.totalBetVolume.toLocaleString()}
           </div>
         </div>
       </div>
 
-      {/* Main Grid: Pending Action Center & Recent Ledger Activity */}
+      {/* Pending Action Queue & Audit Trail */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pending Financial Action Center */}
-        <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 shadow-lg space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="apex-card rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between border-b border-white/[0.07] pb-3">
             <h3 className="font-bold text-sm text-white flex items-center gap-2">
               <Clock className="w-4 h-4 text-amber-400" />
               Action Queue (Pending Review)
             </h3>
             <button
               onClick={() => onNavigateTab('requests')}
-              className="text-xs text-amber-400 hover:text-amber-300 font-semibold"
+              className="text-xs text-[#14e071] hover:text-emerald-300 font-semibold cursor-pointer"
             >
-              Review All Requests →
+              Review All →
             </button>
           </div>
 
           <div className="space-y-2.5">
-            {deposits.filter(d => d.status === 'pending').slice(0, 3).map(dep => (
-              <div
-                key={dep.id}
-                className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white">Deposit: {dep.amount} 🪙</span>
-                    <span className="text-slate-400">by @{dep.username}</span>
-                  </div>
-                  <div className="text-[11px] text-slate-500 font-mono">
-                    Ref: {dep.referenceNumber} ({dep.paymentMethod})
-                  </div>
-                </div>
-                <button
-                  onClick={() => onNavigateTab('requests')}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white border border-emerald-500/30 text-xs font-semibold transition"
+            {deposits
+              .filter(d => d.status === 'pending')
+              .slice(0, 3)
+              .map(dep => (
+                <div
+                  key={dep.id}
+                  className="p-3 rounded-xl bg-[#070c10] border border-white/[0.06] flex items-center justify-between text-xs gap-2"
                 >
-                  Approve / Reject
-                </button>
-              </div>
-            ))}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-white font-mono-numbers">
+                        Deposit: {dep.amount.toLocaleString()}
+                      </span>
+                      <span className="text-slate-400 truncate">@{dep.username}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono-numbers truncate">
+                      Ref: {dep.referenceNumber} ({dep.paymentMethod})
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onNavigateTab('requests')}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500/15 text-[#14e071] hover:bg-[#14e071] hover:text-[#04130b] border border-[#14e071]/35 text-xs font-bold whitespace-nowrap shrink-0 transition cursor-pointer"
+                  >
+                    Review
+                  </button>
+                </div>
+              ))}
 
-            {withdrawals.filter(w => w.status === 'pending').slice(0, 2).map(wdr => (
-              <div
-                key={wdr.id}
-                className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-purple-300">Withdrawal: {wdr.amount} 🪙</span>
-                    <span className="text-slate-400">by @{wdr.username}</span>
-                  </div>
-                  <div className="text-[11px] text-slate-500 font-mono">
-                    {wdr.payoutMethod}: {wdr.payoutDetails}
-                  </div>
-                </div>
-                <button
-                  onClick={() => onNavigateTab('requests')}
-                  className="px-2.5 py-1 rounded-lg bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white border border-purple-500/30 text-xs font-semibold transition"
+            {withdrawals
+              .filter(w => w.status === 'pending')
+              .slice(0, 2)
+              .map(wdr => (
+                <div
+                  key={wdr.id}
+                  className="p-3 rounded-xl bg-[#070c10] border border-white/[0.06] flex items-center justify-between text-xs gap-2"
                 >
-                  Process
-                </button>
-              </div>
-            ))}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-amber-300 font-mono-numbers">
+                        Withdrawal: {wdr.amount.toLocaleString()}
+                      </span>
+                      <span className="text-slate-400 truncate">@{wdr.username}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 font-mono-numbers truncate">
+                      {wdr.payoutMethod}: {wdr.payoutDetails}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => onNavigateTab('requests')}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-300 hover:bg-amber-500 hover:text-slate-950 border border-amber-500/35 text-xs font-bold whitespace-nowrap shrink-0 transition cursor-pointer"
+                  >
+                    Process
+                  </button>
+                </div>
+              ))}
 
             {deposits.filter(d => d.status === 'pending').length === 0 &&
-             withdrawals.filter(w => w.status === 'pending').length === 0 && (
-              <div className="py-8 text-center text-slate-500 text-xs">
-                ✨ Action queue is completely clear. No pending financial requests!
-              </div>
-            )}
+              withdrawals.filter(w => w.status === 'pending').length === 0 && (
+                <div className="py-8 text-center text-slate-400 text-xs">
+                  Action queue is clear. No pending financial requests.
+                </div>
+              )}
           </div>
         </div>
 
-        {/* Recent Admin Audit Activity */}
-        <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 shadow-lg space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        {/* Recent Admin Audit Trail */}
+        <div className="apex-card rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between border-b border-white/[0.07] pb-3">
             <h3 className="font-bold text-sm text-white flex items-center gap-2">
-              <History className="w-4 h-4 text-cyan-400" />
-              Recent Coin Adjustments & Audit Trail
+              <History className="w-4 h-4 text-sky-400" />
+              Recent Coin Adjustments
             </h3>
             <button
               onClick={() => onNavigateTab('audit')}
-              className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold"
+              className="text-xs text-[#14e071] hover:text-emerald-300 font-semibold cursor-pointer"
             >
               Full Audit Log →
             </button>
           </div>
 
           <div className="space-y-2.5">
-            {coinLogs.slice(0, 5).map(log => (
+            {coinLogs.slice(0, 4).map(log => (
               <div
                 key={log.id}
-                className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-xs space-y-1"
+                className="p-3 rounded-xl bg-[#070c10] border border-white/[0.06] text-xs space-y-1"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase font-bold ${
-                      log.type === 'credit' ? 'bg-emerald-500/20 text-emerald-400' :
-                      log.type === 'debit' ? 'bg-rose-500/20 text-rose-400' : 'bg-blue-500/20 text-blue-400'
-                    }`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-[11px] uppercase font-bold ${
+                        log.type === 'credit'
+                          ? 'text-[#14e071]'
+                          : log.type === 'debit'
+                            ? 'text-rose-400'
+                            : 'text-sky-400'
+                      }`}
+                    >
                       {log.type}
                     </span>
+                    <span className="text-slate-600">·</span>
                     <span className="font-bold text-white">@{log.username}</span>
                   </div>
 
-                  <span className="font-mono text-slate-400 text-[11px]">
-                    {log.previousBalance} → <strong className="text-white">{log.newBalance} 🪙</strong>
+                  <span className="font-mono-numbers text-slate-400 text-[11px]">
+                    {log.previousBalance} → <strong className="text-white">{log.newBalance}</strong>
                   </span>
                 </div>
 
-                <div className="text-slate-400 text-[11px]">
-                  Reason: <span className="text-slate-300">{log.reason}</span>
-                </div>
+                <div className="text-slate-400 text-[11px] truncate">{log.reason}</div>
 
-                <div className="text-[10px] text-slate-500 flex justify-between pt-0.5">
+                <div className="text-[10px] text-slate-500 flex justify-between pt-0.5 font-mono-numbers">
                   <span>By: {log.adminUsername}</span>
-                  <span>{new Date(log.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span>
+                    {new Date(log.createdAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </span>
                 </div>
               </div>
             ))}
@@ -386,19 +740,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      {/* WhatsApp Support Manager (Admin Controlled) */}
-      <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 shadow-lg space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+      {/* WhatsApp Support Manager */}
+      <div className="apex-card rounded-2xl p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/[0.07] pb-3">
           <div>
             <h3 className="font-bold text-sm text-white flex items-center gap-2">
-              <MessageCircle className="w-4 h-4 text-emerald-400" />
+              <MessageCircle className="w-4 h-4 text-[#14e071]" />
               User WhatsApp Support Button Settings
             </h3>
             <p className="text-[11px] text-slate-400 mt-0.5">
               Configure the WhatsApp support number and button shown on the User Login page and User Dashboard.
             </p>
           </div>
-          <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+          <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer bg-[#070c10] px-3 py-1.5 rounded-xl border border-white/[0.08]">
             <input
               type="checkbox"
               checked={waEnabled}
@@ -406,9 +760,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 waDirtyRef.current = true;
                 setWaEnabled(e.target.checked);
               }}
-              className="accent-emerald-500 w-4 h-4 cursor-pointer"
+              className="accent-[#14e071] w-4 h-4 cursor-pointer"
             />
-            <span className={waEnabled ? 'text-emerald-400' : 'text-slate-400'}>
+            <span className={waEnabled ? 'text-[#14e071]' : 'text-slate-400'}>
               {waEnabled ? 'Enabled for Users' : 'Hidden from Users'}
             </span>
           </label>
@@ -427,18 +781,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 setWaPhone(e.target.value);
                 setWaError('');
               }}
-              placeholder="e.g. +91 9876543210 or +15551234567"
-              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono outline-none"
+              placeholder="e.g. +91 9876543210"
+              className="w-full bg-[#070c10] border border-white/[0.1] focus:border-[#14e071] rounded-xl px-3 py-2 text-white font-mono-numbers outline-none"
             />
-            <span className="text-[10px] text-slate-500 block">
-              Include country code (e.g. 91 for India, 1 for US).
-            </span>
           </div>
 
           <div className="space-y-1">
-            <label className="text-slate-300 font-semibold block">
-              Button Label
-            </label>
+            <label className="text-slate-300 font-semibold block">Button Label</label>
             <input
               type="text"
               value={waLabel}
@@ -447,7 +796,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 setWaLabel(e.target.value);
               }}
               placeholder="WhatsApp Support"
-              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white outline-none"
+              className="w-full bg-[#070c10] border border-white/[0.1] focus:border-[#14e071] rounded-xl px-3 py-2 text-white outline-none"
             />
           </div>
 
@@ -463,7 +812,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 setWaMessage(e.target.value);
               }}
               placeholder="Hello Admin, I need help with my account."
-              className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white outline-none"
+              className="w-full bg-[#070c10] border border-white/[0.1] focus:border-[#14e071] rounded-xl px-3 py-2 text-white outline-none"
             />
           </div>
 
@@ -476,7 +825,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               )}
               {waSuccess && (
-                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 flex items-center gap-1.5">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[#14e071] flex items-center gap-1.5">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
                   <span>{waSuccess}</span>
                 </div>
@@ -486,7 +835,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <button
               type="submit"
               disabled={waSaving}
-              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition cursor-pointer"
+              className="px-5 py-2.5 rounded-xl apex-glow-btn disabled:opacity-60 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
             >
               <Save className="w-4 h-4" />
               <span>{waSaving ? 'Saving...' : 'Save WhatsApp Support'}</span>
@@ -495,9 +844,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </form>
       </div>
 
-      {/* Official Admin Payment Gateway & UPI IDs (Quick Edit) */}
-      <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-5 shadow-lg space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+      {/* Official Admin Payment Gateway & UPI IDs */}
+      <div className="apex-card rounded-2xl p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/[0.07] pb-3">
           <div>
             <h3 className="font-bold text-sm text-white flex items-center gap-2">
               <Landmark className="w-4 h-4 text-amber-400" />
@@ -511,7 +860,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <button
               type="button"
               onClick={onOpenPaymentGateway}
-              className="text-xs text-amber-400 hover:text-amber-300 font-semibold self-start sm:self-auto cursor-pointer"
+              className="text-xs text-[#14e071] hover:text-emerald-300 font-semibold self-start sm:self-auto cursor-pointer"
             >
               Manage Per-User Gateways →
             </button>
