@@ -106,7 +106,7 @@ service cloud.firestore {
         isValidId(data.id) &&
         data.title is string && data.title.size() >= 3 && data.title.size() <= 240 &&
         data.subtitle is string && data.subtitle.size() >= 1 && data.subtitle.size() <= 200 &&
-        data.category in ['Cricket', 'Football', 'Basketball', 'Tennis', 'Esports', 'Crypto & Finance'] &&
+        data.category in ['Cricket', 'Movies', 'Football', 'Basketball', 'Tennis', 'Esports', 'Crypto & Finance'] &&
         data.yesOdds is number && data.yesOdds >= 1 && data.yesOdds <= 100 &&
         data.noOdds is number && data.noOdds >= 1 && data.noOdds <= 100 &&
         data.minBet is number && data.minBet >= 1 &&
@@ -134,7 +134,7 @@ service cloud.firestore {
         data.username is string && data.username.size() >= 1 && data.username.size() <= 64 &&
         isValidId(data.predictionId) &&
         data.predictionTitle is string && data.predictionTitle.size() >= 1 && data.predictionTitle.size() <= 240 &&
-        data.predictionCategory in ['Cricket', 'Football', 'Basketball', 'Tennis', 'Esports', 'Crypto & Finance'] &&
+        data.predictionCategory in ['Cricket', 'Movies', 'Football', 'Basketball', 'Tennis', 'Esports', 'Crypto & Finance'] &&
         data.choice in ['YES', 'NO'] &&
         data.odds is number && data.odds >= 1 &&
         data.amount is number && data.amount > 0 &&

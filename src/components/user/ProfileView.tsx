@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
+import { motion } from 'motion/react';
 import { useApp } from '../../context/AppContext';
 import { 
   KeyRound, 
   User as UserIcon, 
-  ShieldCheck, 
   CheckCircle2, 
   AlertTriangle, 
   X,
-  Lock,
   Calendar,
   Coins
 } from 'lucide-react';
@@ -57,8 +56,20 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.16 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 12 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 8 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-950/50">
           <div className="flex items-center gap-2">
@@ -67,7 +78,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onClose }) => {
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -171,14 +182,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onClose }) => {
             <div className="pt-2">
               <button
                 type="submit"
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase tracking-wider transition shadow-md"
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase tracking-wider transition shadow-md cursor-pointer"
               >
                 Update Password
               </button>
             </div>
           </form>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 };

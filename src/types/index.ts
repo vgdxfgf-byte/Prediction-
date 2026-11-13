@@ -38,7 +38,7 @@ export interface User {
   customPaymentGateway?: PaymentGatewayConfig | null;
 }
 
-export type PredictionCategory = 'Cricket' | 'Football' | 'Basketball' | 'Tennis' | 'Esports' | 'Crypto & Finance';
+export type PredictionCategory = 'Cricket' | 'Movies' | 'Football' | 'Basketball' | 'Tennis' | 'Esports' | 'Crypto & Finance';
 
 export type PredictionStatus = 'open' | 'paused' | 'closed' | 'settled';
 

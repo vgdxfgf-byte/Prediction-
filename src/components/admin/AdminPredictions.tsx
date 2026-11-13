@@ -27,6 +27,7 @@ interface AdminPredictionsProps {
 
 const CATEGORIES: PredictionCategory[] = [
   'Cricket',
+  'Movies',
   'Football',
   'Basketball',
   'Tennis',

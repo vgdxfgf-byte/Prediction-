@@ -224,6 +224,7 @@ const MainAppContent: React.FC = () => {
                 onNavigateTab={setUserTab}
                 onOpenDeposit={handleOpenDeposit}
                 onOpenWithdraw={handleOpenWithdraw}
+                onOpenProfile={() => setShowProfileModal(true)}
               />
             )}
 
@@ -259,9 +260,11 @@ const MainAppContent: React.FC = () => {
       </AnimatePresence>
 
       {/* User Profile / Change Password Modal */}
-      {showProfileModal && (
-        <ProfileView onClose={() => setShowProfileModal(false)} />
-      )}
+      <AnimatePresence>
+        {showProfileModal && (
+          <ProfileView onClose={() => setShowProfileModal(false)} />
+        )}
+      </AnimatePresence>
 
       {/* Footer */}
       <footer className="py-5 text-center text-xs text-slate-500 border-t border-slate-900 bg-slate-950">

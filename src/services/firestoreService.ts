@@ -234,83 +234,165 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
   } catch (err) {
     handleFirestoreError(err, OperationType.GET, 'settings/paymentGateway');
   }
-  if (gwSnap.exists()) return;
 
-  const batch = writeBatch(db);
   const now = Date.now();
+  if (!gwSnap.exists()) {
+    const batch = writeBatch(db);
 
-  batch.set(gwRef, {
-    title: 'Official Admin Payment Gateway',
-    instructions:
-      'Transfer your exact amount to any active Official Admin Payment Gateway channel below, then enter your transaction reference ID.',
-    channels: [
-      { id: 'gw_upi', label: 'Admin UPI ID', value: 'apexpredict@icici', enabled: true },
-      { id: 'gw_usdt', label: 'USDT TRC-20', value: 'TX9vK7m842jqp1y38aG98kL', enabled: true },
-      {
-        id: 'gw_bank',
-        label: 'Bank Account / IMPS',
-        value: 'ApexPredict Holdings • A/C 9028174650 • IFSC ICIC0001042',
-        enabled: false
-      }
-    ],
-    updatedAt: serverTimestamp()
-  });
+    batch.set(gwRef, {
+      title: 'Official Admin Payment Gateway',
+      instructions:
+        'Transfer your exact amount to any active Official Admin Payment Gateway channel below, then enter your transaction reference ID.',
+      channels: [
+        { id: 'gw_upi', label: 'Admin UPI ID', value: 'apexpredict@icici', enabled: true },
+        { id: 'gw_usdt', label: 'USDT TRC-20', value: 'TX9vK7m842jqp1y38aG98kL', enabled: true },
+        {
+          id: 'gw_bank',
+          label: 'Bank Account / IMPS',
+          value: 'ApexPredict Holdings • A/C 9028174650 • IFSC ICIC0001042',
+          enabled: false
+        }
+      ],
+      updatedAt: serverTimestamp()
+    });
 
-  batch.set(doc(db, 'settings', 'whatsappSupport'), {
-    enabled: true,
-    phoneNumber: '',
-    buttonLabel: 'WhatsApp Support',
-    defaultMessage: 'Hello Admin, I need assistance with my ApexPredict account.',
-    updatedAt: serverTimestamp()
-  });
+    batch.set(doc(db, 'settings', 'whatsappSupport'), {
+      enabled: true,
+      phoneNumber: '',
+      buttonLabel: 'WhatsApp Support',
+      defaultMessage: 'Hello Admin, I need assistance with my ApexPredict account.',
+      updatedAt: serverTimestamp()
+    });
 
-  batch.set(doc(db, 'predictions', 'pred_1'), {
-    id: 'pred_1',
-    title: "Will India win today's cricket match against Australia?",
-    subtitle: 'Border-Gavaskar Trophy - Match 2, Melbourne',
-    category: 'Cricket',
-    yesOdds: 1.85,
-    noOdds: 2.15,
-    minBet: 50,
-    maxBet: 5000,
-    closingTime: new Date(now + 24 * 3600 * 1000).toISOString(),
-    status: 'open',
-    outcome: null,
-    totalYesVolume: 0,
-    totalNoVolume: 0,
-    totalParticipants: 0,
-    iconName: 'trophy',
-    description:
-      'Match resolves to YES if India wins outright. In case of tie/draw or rain washout without result, bets will be refunded.',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
+    batch.set(doc(db, 'predictions', 'pred_1'), {
+      id: 'pred_1',
+      title: "Will India win today's cricket match against Australia?",
+      subtitle: 'Border-Gavaskar Trophy · Match 2, Melbourne',
+      category: 'Cricket',
+      yesOdds: 1.85,
+      noOdds: 2.15,
+      minBet: 50,
+      maxBet: 5000,
+      closingTime: new Date(now + 24 * 3600 * 1000).toISOString(),
+      status: 'open',
+      outcome: null,
+      totalYesVolume: 0,
+      totalNoVolume: 0,
+      totalParticipants: 0,
+      iconName: 'trophy',
+      description:
+        'Match resolves to YES if India wins outright. In case of tie/draw or rain washout without result, bets will be refunded.',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
 
-  batch.set(doc(db, 'predictions', 'pred_2'), {
-    id: 'pred_2',
-    title: "Will Real Madrid win today's UEFA Champions League clash?",
-    subtitle: 'UEFA Champions League - Real Madrid vs Bayern Munich',
-    category: 'Football',
-    yesOdds: 2.1,
-    noOdds: 1.78,
-    minBet: 50,
-    maxBet: 10000,
-    closingTime: new Date(now + 36 * 3600 * 1000).toISOString(),
-    status: 'open',
-    outcome: null,
-    totalYesVolume: 0,
-    totalNoVolume: 0,
-    totalParticipants: 0,
-    iconName: 'flame',
-    description: 'Official 90 minutes + injury time result.',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
+    batch.set(doc(db, 'predictions', 'pred_2'), {
+      id: 'pred_2',
+      title: "Will Real Madrid win today's UEFA Champions League clash?",
+      subtitle: 'UEFA Champions League · Real Madrid vs Bayern Munich',
+      category: 'Football',
+      yesOdds: 2.1,
+      noOdds: 1.78,
+      minBet: 50,
+      maxBet: 10000,
+      closingTime: new Date(now + 36 * 3600 * 1000).toISOString(),
+      status: 'open',
+      outcome: null,
+      totalYesVolume: 0,
+      totalNoVolume: 0,
+      totalParticipants: 0,
+      iconName: 'flame',
+      description: 'Official 90 minutes + injury time result.',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
 
+    try {
+      await batch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'seedInitialFirestore');
+    }
+  }
+
+  // Ensure Movies & extra Cricket markets exist if none for Movies exist yet
+  let moviesSnap;
   try {
-    await batch.commit();
+    moviesSnap = await getDocs(query(collection(db, 'predictions'), where('category', '==', 'Movies'), limit(1)));
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, 'seedInitialFirestore');
+    handleFirestoreError(err, OperationType.LIST, 'predictions');
+  }
+
+  if (moviesSnap.empty) {
+    const extraBatch = writeBatch(db);
+
+    extraBatch.set(doc(db, 'predictions', 'pred_cricket_2'), {
+      id: 'pred_cricket_2',
+      title: 'Will the Mumbai vs Chennai T20 clash cross 360+ total match runs?',
+      subtitle: 'T20 Premier League · Wankhede Stadium',
+      category: 'Cricket',
+      yesOdds: 1.92,
+      noOdds: 1.88,
+      minBet: 50,
+      maxBet: 5000,
+      closingTime: new Date(now + 18 * 3600 * 1000).toISOString(),
+      status: 'open',
+      outcome: null,
+      totalYesVolume: 0,
+      totalNoVolume: 0,
+      totalParticipants: 0,
+      iconName: 'trophy',
+      description: 'Combined first and second innings runs across both teams.',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    extraBatch.set(doc(db, 'predictions', 'pred_movie_1'), {
+      id: 'pred_movie_1',
+      title: "Will this week's Pan-India blockbuster cross ₹100 Cr Nett in 3 days?",
+      subtitle: 'Opening Weekend Box Office · India Theatrical',
+      category: 'Movies',
+      yesOdds: 1.78,
+      noOdds: 2.2,
+      minBet: 50,
+      maxBet: 10000,
+      closingTime: new Date(now + 48 * 3600 * 1000).toISOString(),
+      status: 'open',
+      outcome: null,
+      totalYesVolume: 0,
+      totalNoVolume: 0,
+      totalParticipants: 0,
+      iconName: 'film',
+      description: 'Settled using official weekend India theatrical nett box-office trade figures.',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    extraBatch.set(doc(db, 'predictions', 'pred_movie_2'), {
+      id: 'pred_movie_2',
+      title: "Will Friday's big cinema sequel hold an 8.0+ IMDb score after 48 hours?",
+      subtitle: 'Cinema & Audience Verdict · Multiplex Release',
+      category: 'Movies',
+      yesOdds: 2.05,
+      noOdds: 1.82,
+      minBet: 50,
+      maxBet: 5000,
+      closingTime: new Date(now + 42 * 3600 * 1000).toISOString(),
+      status: 'open',
+      outcome: null,
+      totalYesVolume: 0,
+      totalNoVolume: 0,
+      totalParticipants: 0,
+      iconName: 'film',
+      description: 'Resolves to YES if IMDb rating is 8.0 or above 48 hours post-release.',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    try {
+      await extraBatch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'seedMovieAndCricketMarkets');
+    }
   }
 }
 

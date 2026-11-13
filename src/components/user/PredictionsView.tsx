@@ -4,15 +4,11 @@ import { useApp } from '../../context/AppContext';
 import { Prediction, PredictionCategory } from '../../types';
 import { 
   Search, 
-  Filter, 
   Clock, 
   CheckCircle2, 
   XCircle, 
-  AlertCircle, 
-  Flame, 
-  Coins, 
-  ShieldAlert,
-  ArrowUpDown
+  Trophy,
+  Film
 } from 'lucide-react';
 
 interface PredictionsViewProps {
@@ -22,6 +18,7 @@ interface PredictionsViewProps {
 const CATEGORIES: ('All' | PredictionCategory)[] = [
   'All',
   'Cricket',
+  'Movies',
   'Football',
   'Basketball',
   'Tennis',
@@ -64,12 +61,12 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <span>Prediction Markets</span>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
-              Live Odds
+            <span className="text-xs font-semibold text-emerald-400">
+              · Live Odds
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Pick YES or NO on verified sports matches and global events.
+            Pick YES or NO on Cricket matches, Movie box office & global events.
           </p>
         </div>
 
@@ -80,7 +77,7 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search teams, matches, or questions..."
+            placeholder="Search cricket, movies, teams, or questions..."
             className="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
           />
           {searchQuery && (
@@ -94,30 +91,44 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
         </div>
       </div>
 
-      {/* Category Pills & Status Filter */}
+      {/* Category Tabs & Status Filter */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
         {/* Categories scrollable */}
         <div className="flex items-center gap-1.5 overflow-x-auto w-full pb-1 sm:pb-0 scrollbar-none">
-          {CATEGORIES.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-                selectedCategory === cat
-                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-950/50'
-                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
+          {CATEGORIES.map(cat => {
+            const isSelected = selectedCategory === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`relative px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isSelected
+                    ? 'text-white'
+                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                {isSelected && (
+                  <motion.span
+                    layoutId="predictionsCategoryTab"
+                    transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                    className="absolute inset-0 rounded-xl bg-emerald-600 shadow-sm shadow-emerald-950/50"
+                  />
+                )}
+                <span className="relative z-10 flex items-center gap-1.5">
+                  {cat === 'Cricket' && <Trophy className="w-3.5 h-3.5" />}
+                  {cat === 'Movies' && <Film className="w-3.5 h-3.5" />}
+                  {cat}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Status Filter */}
         <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 shrink-0 text-xs self-end sm:self-auto">
           <button
             onClick={() => setStatusFilter('open')}
-            className={`px-2.5 py-1 rounded-lg font-medium transition ${
+            className={`px-2.5 py-1 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
               statusFilter === 'open' ? 'bg-slate-800 text-emerald-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -125,7 +136,7 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
           </button>
           <button
             onClick={() => setStatusFilter('settled')}
-            className={`px-2.5 py-1 rounded-lg font-medium transition ${
+            className={`px-2.5 py-1 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
               statusFilter === 'settled' ? 'bg-slate-800 text-blue-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -133,7 +144,7 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
           </button>
           <button
             onClick={() => setStatusFilter('all')}
-            className={`px-2.5 py-1 rounded-lg font-medium transition ${
+            className={`px-2.5 py-1 rounded-lg font-medium whitespace-nowrap transition cursor-pointer ${
               statusFilter === 'all' ? 'bg-slate-800 text-white font-semibold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -181,15 +192,16 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
                 {/* Card Top: Category, Match context, Status */}
                 <div>
                   <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="px-2.5 py-0.5 rounded-md bg-slate-800 text-slate-300 font-semibold border border-slate-700/80 text-[11px]">
-                      {pred.category}
+                    <span className="flex items-center gap-1.5 font-semibold text-[11px] text-slate-300">
+                      {pred.category === 'Cricket' && <Trophy className="w-3.5 h-3.5 text-emerald-400" />}
+                      {pred.category === 'Movies' && <Film className="w-3.5 h-3.5 text-purple-400" />}
+                      <span>{pred.category}</span>
                     </span>
 
                     {/* Status Pill */}
                     {isOpen && (
-                      <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-semibold">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        Active
+                      <span className="text-emerald-400 text-[10px] font-semibold">
+                        Open
                       </span>
                     )}
                     {isPaused && (
