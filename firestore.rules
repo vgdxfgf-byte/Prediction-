@@ -1,0 +1,377 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Reusable Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'vgdxfgf@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOptionalString(data, key, maxLen) {
+      return !(key in data) || data[key] == null || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    // --- Validation Blueprints ---
+    function isValidAdminMember(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.role == 'admin' &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSetting(data) {
+      return data.keys().hasAll(['updatedAt']) &&
+        data.keys().hasOnly(['title', 'instructions', 'channels', 'enabled', 'phoneNumber', 'buttonLabel', 'defaultMessage', 'updatedAt']) &&
+        isOptionalString(data, 'title', 120) &&
+        isOptionalString(data, 'instructions', 1000) &&
+        (!('channels' in data) || (data.channels is list && data.channels.size() <= 20 && (data.channels.size() == 0 || data.channels[0] is map))) &&
+        (!('enabled' in data) || data.enabled is bool) &&
+        isOptionalString(data, 'phoneNumber', 40) &&
+        isOptionalString(data, 'buttonLabel', 60) &&
+        isOptionalString(data, 'defaultMessage', 300) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'username', 'fullName', 'coins', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'username', 'fullName', 'coins', 'status', 'ownerUid', 'notes', 'lastLogin', 'customPaymentGateway', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.username is string && data.username.size() >= 2 && data.username.size() <= 64 &&
+        data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 100 &&
+        data.coins is number && data.coins >= 0 &&
+        data.status in ['active', 'suspended'] &&
+        isOptionalString(data, 'ownerUid', 128) &&
+        isOptionalString(data, 'notes', 500) &&
+        isOptionalString(data, 'lastLogin', 64) &&
+        (!('customPaymentGateway' in data) || data.customPaymentGateway == null || data.customPaymentGateway is map) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivateInfo(data) {
+      return data.keys().hasAll(['updatedAt']) &&
+        data.keys().hasOnly(['ownerUid', 'email', 'phone', 'updatedAt']) &&
+        isOptionalString(data, 'ownerUid', 128) &&
+        isOptionalString(data, 'email', 160) &&
+        isOptionalString(data, 'phone', 40) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAccountClaim(data) {
+      return data.keys().hasAll(['userId', 'username', 'accessCode', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'username', 'accessCode', 'claimedByUid', 'createdAt', 'updatedAt']) &&
+        isValidId(data.userId) &&
+        data.username is string && data.username.size() >= 2 && data.username.size() <= 64 &&
+        data.accessCode is string && data.accessCode.size() >= 4 && data.accessCode.size() <= 64 &&
+        isOptionalString(data, 'claimedByUid', 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPrediction(data) {
+      return data.keys().hasAll(['id', 'title', 'subtitle', 'category', 'yesOdds', 'noOdds', 'minBet', 'maxBet', 'closingTime', 'status', 'totalYesVolume', 'totalNoVolume', 'totalParticipants', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'title', 'subtitle', 'category', 'yesOdds', 'noOdds', 'minBet', 'maxBet', 'closingTime', 'status', 'outcome', 'totalYesVolume', 'totalNoVolume', 'totalParticipants', 'settledAt', 'settledBy', 'iconName', 'description', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.title is string && data.title.size() >= 3 && data.title.size() <= 240 &&
+        data.subtitle is string && data.subtitle.size() >= 1 && data.subtitle.size() <= 200 &&
+        data.category in ['Cricket', 'Football', 'Basketball', 'Tennis', 'Esports', 'Crypto & Finance'] &&
+        data.yesOdds is number && data.yesOdds >= 1 && data.yesOdds <= 100 &&
+        data.noOdds is number && data.noOdds >= 1 && data.noOdds <= 100 &&
+        data.minBet is number && data.minBet >= 1 &&
+        data.maxBet is number && data.maxBet >= data.minBet &&
+        data.closingTime is string && data.closingTime.size() <= 64 &&
+        data.status in ['open', 'paused', 'closed', 'settled'] &&
+        (!('outcome' in data) || data.outcome == null || data.outcome in ['YES', 'NO', 'VOID']) &&
+        data.totalYesVolume is number && data.totalYesVolume >= 0 &&
+        data.totalNoVolume is number && data.totalNoVolume >= 0 &&
+        data.totalParticipants is number && data.totalParticipants >= 0 &&
+        isOptionalString(data, 'settledAt', 64) &&
+        isOptionalString(data, 'settledBy', 64) &&
+        isOptionalString(data, 'iconName', 40) &&
+        isOptionalString(data, 'description', 1000) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBet(data) {
+      return data.keys().hasAll(['id', 'userId', 'ownerUid', 'username', 'predictionId', 'predictionTitle', 'predictionCategory', 'choice', 'odds', 'amount', 'potentialWinnings', 'actualWinnings', 'result', 'transactionId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'ownerUid', 'username', 'predictionId', 'predictionTitle', 'predictionCategory', 'choice', 'odds', 'amount', 'potentialWinnings', 'actualWinnings', 'result', 'transactionId', 'settledAt', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        isValidId(data.ownerUid) &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 64 &&
+        isValidId(data.predictionId) &&
+        data.predictionTitle is string && data.predictionTitle.size() >= 1 && data.predictionTitle.size() <= 240 &&
+        data.predictionCategory in ['Cricket', 'Football', 'Basketball', 'Tennis', 'Esports', 'Crypto & Finance'] &&
+        data.choice in ['YES', 'NO'] &&
+        data.odds is number && data.odds >= 1 &&
+        data.amount is number && data.amount > 0 &&
+        data.potentialWinnings is number && data.potentialWinnings >= data.amount &&
+        data.actualWinnings is number && data.actualWinnings >= 0 &&
+        data.result in ['pending', 'won', 'lost', 'voided'] &&
+        isValidId(data.transactionId) &&
+        isOptionalString(data, 'settledAt', 64) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['id', 'userId', 'ownerUid', 'username', 'type', 'amount', 'balanceBefore', 'balanceAfter', 'status', 'description', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'ownerUid', 'username', 'type', 'amount', 'balanceBefore', 'balanceAfter', 'status', 'description', 'referenceId', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        isValidId(data.ownerUid) &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 64 &&
+        data.type in ['deposit', 'withdrawal', 'bet_placed', 'bet_won', 'bet_refund', 'admin_credit', 'admin_debit'] &&
+        data.amount is number &&
+        data.balanceBefore is number && data.balanceBefore >= 0 &&
+        data.balanceAfter is number && data.balanceAfter >= 0 &&
+        data.status in ['pending', 'completed', 'rejected', 'processing'] &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 300 &&
+        isOptionalString(data, 'referenceId', 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDeposit(data) {
+      return data.keys().hasAll(['id', 'userId', 'ownerUid', 'username', 'amount', 'paymentMethod', 'referenceNumber', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'ownerUid', 'username', 'amount', 'paymentMethod', 'referenceNumber', 'notes', 'status', 'reviewedAt', 'reviewedBy', 'adminRemark', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        isValidId(data.ownerUid) &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 64 &&
+        data.amount is number && data.amount > 0 &&
+        data.paymentMethod is string && data.paymentMethod.size() >= 1 && data.paymentMethod.size() <= 120 &&
+        data.referenceNumber is string && data.referenceNumber.size() >= 1 && data.referenceNumber.size() <= 120 &&
+        isOptionalString(data, 'notes', 400) &&
+        data.status in ['pending', 'approved', 'rejected'] &&
+        isOptionalString(data, 'reviewedAt', 64) &&
+        isOptionalString(data, 'reviewedBy', 64) &&
+        isOptionalString(data, 'adminRemark', 400) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWithdrawal(data) {
+      return data.keys().hasAll(['id', 'userId', 'ownerUid', 'username', 'amount', 'payoutMethod', 'payoutDetails', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'ownerUid', 'username', 'amount', 'payoutMethod', 'payoutDetails', 'status', 'reviewedAt', 'reviewedBy', 'adminRemark', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        isValidId(data.ownerUid) &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 64 &&
+        data.amount is number && data.amount > 0 &&
+        data.payoutMethod is string && data.payoutMethod.size() >= 1 && data.payoutMethod.size() <= 120 &&
+        data.payoutDetails is string && data.payoutDetails.size() >= 1 && data.payoutDetails.size() <= 300 &&
+        data.status in ['pending', 'processing', 'approved', 'rejected'] &&
+        isOptionalString(data, 'reviewedAt', 64) &&
+        isOptionalString(data, 'reviewedBy', 64) &&
+        isOptionalString(data, 'adminRemark', 400) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCoinLog(data) {
+      return data.keys().hasAll(['id', 'userId', 'username', 'adminId', 'adminUsername', 'type', 'amount', 'previousBalance', 'newBalance', 'reason', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'username', 'adminId', 'adminUsername', 'type', 'amount', 'previousBalance', 'newBalance', 'reason', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 64 &&
+        isValidId(data.adminId) &&
+        data.adminUsername is string && data.adminUsername.size() >= 1 && data.adminUsername.size() <= 64 &&
+        data.type in ['credit', 'debit', 'set'] &&
+        data.amount is number && data.amount >= 0 &&
+        data.previousBalance is number && data.previousBalance >= 0 &&
+        data.newBalance is number && data.newBalance >= 0 &&
+        data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 300 &&
+        data.createdAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    match /test/connection {
+      allow get: if true;
+      allow list, write: if false;
+    }
+
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && (isAdmin() || (isVerifiedUser() && request.auth.uid == uid));
+      allow list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(uid) && isValidAdminMember(incoming());
+      allow delete: if isAdmin() && isValidId(uid);
+    }
+
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId) && (settingId == 'whatsappSupport' || isVerifiedUser() || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(settingId) && isValidSetting(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(settingId) && isValidSetting(incoming()) && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(settingId);
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isValidId(userId) && isValidUser(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
+        isAdmin() ||
+        (isVerifiedUser() && userId == request.auth.uid && incoming().ownerUid == request.auth.uid && incoming().coins == 0 && incoming().status == 'active')
+      );
+      allow update: if isValidId(userId) && isValidUser(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
+        isAdmin() ||
+        // Self-service Google user claiming an unclaimed admin-created account atomically with account_claims
+        (isVerifiedUser() && existing().ownerUid == null && incoming().ownerUid == request.auth.uid &&
+          incoming().coins == existing().coins && incoming().status == existing().status &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['ownerUid', 'lastLogin', 'updatedAt']) &&
+          getAfter(/databases/$(database)/documents/account_claims/$(existing().username.lower())).data.claimedByUid == request.auth.uid) ||
+        // Authenticated owner updating lastLogin or deducting coins for a bet/withdrawal
+        (isVerifiedUser() && existing().ownerUid == request.auth.uid &&
+          incoming().ownerUid == existing().ownerUid &&
+          incoming().status == existing().status &&
+          incoming().username == existing().username &&
+          incoming().coins <= existing().coins &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['coins', 'lastLogin', 'updatedAt']))
+      );
+      allow delete: if isAdmin() && isValidId(userId);
+
+      match /private/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && (
+          isAdmin() ||
+          (isVerifiedUser() && get(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
+        );
+        allow list: if isAdmin();
+        allow create, update: if isValidId(userId) && isValidId(docId) && isValidUserPrivateInfo(incoming()) && incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isVerifiedUser() && get(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
+        );
+        allow delete: if isAdmin() && isValidId(userId) && isValidId(docId);
+      }
+    }
+
+    match /account_claims/{usernameKey} {
+      allow get: if isValidId(usernameKey) && (isAdmin() || isVerifiedUser());
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(usernameKey) && isValidAccountClaim(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(usernameKey) && isValidAccountClaim(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
+        isAdmin() ||
+        (isVerifiedUser() && existing().claimedByUid == null && incoming().claimedByUid == request.auth.uid &&
+          incoming().userId == existing().userId && incoming().username == existing().username && incoming().accessCode == existing().accessCode &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['claimedByUid', 'updatedAt']))
+      );
+      allow delete: if isAdmin() && isValidId(usernameKey);
+    }
+
+    match /predictions/{predictionId} {
+      allow get: if isValidId(predictionId);
+      allow list: if true;
+      allow create: if isAdmin() && isValidId(predictionId) && isValidPrediction(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(predictionId) && isValidPrediction(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
+        isAdmin() ||
+        (isVerifiedUser() && existing().status == 'open' &&
+          incoming().status == existing().status &&
+          incoming().yesOdds == existing().yesOdds &&
+          incoming().noOdds == existing().noOdds &&
+          incoming().totalYesVolume >= existing().totalYesVolume &&
+          incoming().totalNoVolume >= existing().totalNoVolume &&
+          incoming().totalParticipants == existing().totalParticipants + 1 &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['totalYesVolume', 'totalNoVolume', 'totalParticipants', 'updatedAt']))
+      );
+      allow delete: if isAdmin() && isValidId(predictionId);
+    }
+
+    match /bets/{betId} {
+      allow get: if isValidId(betId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isVerifiedUser() && isValidId(betId) && isValidBet(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().result == 'pending' &&
+        incoming().actualWinnings == 0 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/predictions/$(incoming().predictionId));
+      allow update: if isAdmin() && isValidId(betId) && isValidBet(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(betId);
+    }
+
+    match /transactions/{txId} {
+      allow get: if isValidId(txId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isValidId(txId) && isValidTransaction(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
+        isAdmin() ||
+        (isVerifiedUser() && incoming().ownerUid == request.auth.uid && incoming().type in ['bet_placed', 'withdrawal'])
+      );
+      allow update: if isAdmin() && isValidId(txId) && isValidTransaction(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(txId);
+    }
+
+    match /deposits/{depositId} {
+      allow get: if isValidId(depositId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isVerifiedUser() && isValidId(depositId) && isValidDeposit(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().status == 'pending' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(depositId) && isValidDeposit(incoming()) &&
+        existing().status == 'pending' &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(depositId);
+    }
+
+    match /withdrawals/{withdrawalId} {
+      allow get: if isValidId(withdrawalId) && (isAdmin() || (isVerifiedUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isVerifiedUser() && isValidId(withdrawalId) && isValidWithdrawal(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().status == 'pending' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(withdrawalId) && isValidWithdrawal(incoming()) &&
+        existing().status in ['pending', 'processing'] &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(withdrawalId);
+    }
+
+    match /coinLogs/{logId} {
+      allow get: if isAdmin() && isValidId(logId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() && isValidId(logId) && isValidCoinLog(incoming()) && incoming().createdAt == request.time;
+      allow update, delete: if isAdmin() && isValidId(logId);
+    }
+  }
+}

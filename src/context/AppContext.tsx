@@ -1,4 +1,36 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { onAuthStateChanged, type User as FirebaseAuthUser } from 'firebase/auth';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+import {
+  BOOTSTRAPPED_ADMIN_EMAIL,
+  checkIsFirebaseAdmin,
+  fsAdjustUserCoins,
+  fsCreatePrediction,
+  fsCreateUser,
+  fsDeletePrediction,
+  fsDeleteUser,
+  fsPlaceBet,
+  fsRequestDeposit,
+  fsRequestWithdrawal,
+  fsResetUserPassword,
+  fsReviewDeposit,
+  fsReviewWithdrawal,
+  fsSettlePrediction,
+  fsToggleUserStatus,
+  fsUpdateGlobalPaymentGateway,
+  fsUpdatePrediction,
+  fsUpdateUser,
+  fsUpdateUserPaymentGateway,
+  fsUpdateWhatsAppSupport,
+  logoutFirebase,
+  seedInitialFirestoreIfNeeded,
+  signInAdminWithGoogle,
+  signInUserWithGoogleOrClaim,
+  subscribeAdminPortalData,
+  subscribePublicData,
+  subscribeUserPortalData
+} from '../services/firestoreService';
 import {
   User,
   Prediction,
@@ -12,7 +44,6 @@ import {
   PaymentGatewayConfig,
   WhatsAppSupportConfig
 } from '../types';
-import { handleStaticApiRequest } from '../utils/staticFallback';
 
 const DEFAULT_PAYMENT_GATEWAY: PaymentGatewayConfig = {
   title: 'Official Admin Payment Gateway',
@@ -42,7 +73,9 @@ interface AppContextType {
   adminUser: User | null;
   isHydrating: boolean;
   loginUser: (username: string, pass: string) => Promise<ActionResult>;
+  loginUserWithGoogle: () => Promise<ActionResult>;
   loginAdmin: (username: string, pass: string) => Promise<ActionResult>;
+  loginAdminWithGoogle: () => Promise<ActionResult>;
   logout: () => void;
   changePassword: (userId: string, oldPass: string, newPass: string) => Promise<ActionResult>;
   changeAdminCredentials: (currentPassword: string, newPassword: string, newUsername?: string) => Promise<ActionResult>;
@@ -110,9 +143,8 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const STORAGE_KEYS = {
-  USER_TOKEN: 'apex_user_token_v2',
-  ADMIN_TOKEN: 'apex_admin_token_v2',
-  PORTAL: 'apex_active_portal_v2'
+  PORTAL: 'apex_active_portal_v2',
+  USER_DOC_ID: 'apex_active_user_doc_v3'
 };
 
 function safeGetStorage(key: string): string | null {
@@ -139,30 +171,6 @@ function safeRemoveStorage(key: string) {
   }
 }
 
-interface UserStatePayload {
-  user: User;
-  predictions: Prediction[];
-  bets: Bet[];
-  transactions: Transaction[];
-  deposits: DepositRequest[];
-  withdrawals: WithdrawalRequest[];
-  effectivePaymentGateway: PaymentGatewayConfig;
-  whatsappSupport?: WhatsAppSupportConfig;
-}
-
-interface AdminStatePayload {
-  admin: User;
-  users: User[];
-  predictions: Prediction[];
-  bets: Bet[];
-  transactions: Transaction[];
-  deposits: DepositRequest[];
-  withdrawals: WithdrawalRequest[];
-  coinLogs: CoinAdjustmentLog[];
-  paymentGateway: PaymentGatewayConfig;
-  whatsappSupport?: WhatsAppSupportConfig;
-}
-
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activePortal, setActivePortalState] = useState<'user' | 'admin'>(() => {
     if (typeof window !== 'undefined') {
@@ -178,16 +186,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved === 'admin' ? 'admin' : 'user';
   });
 
-  const [userToken, setUserToken] = useState<string | null>(() => safeGetStorage(STORAGE_KEYS.USER_TOKEN));
-  const [adminToken, setAdminToken] = useState<string | null>(() => safeGetStorage(STORAGE_KEYS.ADMIN_TOKEN));
+  const [fbAuthUser, setFbAuthUser] = useState<FirebaseAuthUser | null>(null);
+  const [activeUserId, setActiveUserId] = useState<string | null>(() => safeGetStorage(STORAGE_KEYS.USER_DOC_ID));
   const [isHydrating, setIsHydrating] = useState<boolean>(true);
-  const staticModeRef = useRef<boolean>(
-    typeof window !== 'undefined' && window.location.hostname.endsWith('.github.io')
-  );
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [adminUser, setAdminUser] = useState<User | null>(null);
-  const [userEffectiveGateway, setUserEffectiveGateway] = useState<PaymentGatewayConfig>(DEFAULT_PAYMENT_GATEWAY);
 
   const [users, setUsers] = useState<User[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
@@ -214,176 +218,114 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
-  const stateEpochRef = useRef<number>(0);
-
-  const applyUserState = useCallback((state: UserStatePayload, isMutation = false) => {
-    if (isMutation) stateEpochRef.current += 1;
-    setCurrentUser(state.user);
-    setPredictions(state.predictions);
-    setBets(state.bets);
-    setTransactions(state.transactions);
-    setDeposits(state.deposits);
-    setWithdrawals(state.withdrawals);
-    setUserEffectiveGateway(prev =>
-      JSON.stringify(prev) === JSON.stringify(state.effectivePaymentGateway)
-        ? prev
-        : state.effectivePaymentGateway
-    );
-    if (state.whatsappSupport) {
-      const nextWa = state.whatsappSupport;
-      setWhatsappSupport(prev =>
-        JSON.stringify(prev) === JSON.stringify(nextWa) ? prev : nextWa
-      );
-    }
-  }, []);
-
-  const applyAdminState = useCallback((state: AdminStatePayload, isMutation = false) => {
-    if (isMutation) stateEpochRef.current += 1;
-    setAdminUser(state.admin);
-    setUsers(state.users);
-    setPredictions(state.predictions);
-    setBets(state.bets);
-    setTransactions(state.transactions);
-    setDeposits(state.deposits);
-    setWithdrawals(state.withdrawals);
-    setCoinLogs(state.coinLogs);
-    setPaymentGateway(prev =>
-      JSON.stringify(prev) === JSON.stringify(state.paymentGateway)
-        ? prev
-        : state.paymentGateway
-    );
-    if (state.whatsappSupport) {
-      const nextWa = state.whatsappSupport;
-      setWhatsappSupport(prev =>
-        JSON.stringify(prev) === JSON.stringify(nextWa) ? prev : nextWa
-      );
-    }
-  }, []);
-
-  const apiCall = useCallback(
-    async <T = Record<string, unknown>>(
-      url: string,
-      options: RequestInit = {},
-      token?: string | null
-    ): Promise<{ ok: boolean; status: number; data: T & { success?: boolean; error?: string } }> => {
-      if (staticModeRef.current) {
-        return handleStaticApiRequest(url, options, token) as {
-          ok: boolean;
-          status: number;
-          data: T & { success?: boolean; error?: string };
-        };
-      }
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...(options.headers as Record<string, string> | undefined)
-      };
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-      const res = await fetch(url, { ...options, headers, cache: 'no-store' });
-      const contentType = res.headers.get('content-type') || '';
-      if (res.status === 404 && !contentType.includes('application/json')) {
-        staticModeRef.current = true;
-        return handleStaticApiRequest(url, options, token) as {
-          ok: boolean;
-          status: number;
-          data: T & { success?: boolean; error?: string };
-        };
-      }
-      let data = {} as T & { success?: boolean; error?: string };
-      try {
-        data = (await res.json()) as T & { success?: boolean; error?: string };
-      } catch {
-        // Ignore invalid JSON
-      }
-      return { ok: res.ok, status: res.status, data };
-    },
-    []
-  );
-
-  const refreshState = useCallback(async () => {
-    const startEpoch = stateEpochRef.current;
-    try {
-      if (activePortal === 'admin') {
-        if (adminToken) {
-          const res = await apiCall<{ state?: AdminStatePayload }>('/api/admin/state', { method: 'GET' }, adminToken);
-          if (stateEpochRef.current !== startEpoch) return;
-          if (res.ok && res.data.state) {
-            applyAdminState(res.data.state);
-            return;
-          }
-          if (res.status === 401 || res.status === 403) {
-            setAdminToken(null);
-            setAdminUser(null);
-            safeRemoveStorage(STORAGE_KEYS.ADMIN_TOKEN);
-          }
-        }
-        const pub = await apiCall<{ predictions?: Prediction[]; whatsappSupport?: WhatsAppSupportConfig }>('/api/public', { method: 'GET' });
-        if (stateEpochRef.current !== startEpoch) return;
-        if (pub.ok && pub.data.predictions) {
-          setPredictions(pub.data.predictions);
-        }
-        if (pub.ok && pub.data.whatsappSupport) {
-          const nextWa = pub.data.whatsappSupport;
-          setWhatsappSupport(prev =>
-            JSON.stringify(prev) === JSON.stringify(nextWa) ? prev : nextWa
-          );
-        }
-      } else {
-        if (userToken) {
-          const res = await apiCall<{ state?: UserStatePayload }>('/api/user/state', { method: 'GET' }, userToken);
-          if (stateEpochRef.current !== startEpoch) return;
-          if (res.ok && res.data.state) {
-            applyUserState(res.data.state);
-            return;
-          }
-          if (res.status === 401 || res.status === 403) {
-            setUserToken(null);
-            setCurrentUser(null);
-            safeRemoveStorage(STORAGE_KEYS.USER_TOKEN);
-          }
-        }
-        const pub = await apiCall<{ predictions?: Prediction[]; whatsappSupport?: WhatsAppSupportConfig }>('/api/public', { method: 'GET' });
-        if (stateEpochRef.current !== startEpoch) return;
-        if (pub.ok && pub.data.predictions) {
-          setPredictions(pub.data.predictions);
-        }
-        if (pub.ok && pub.data.whatsappSupport) {
-          const nextWa = pub.data.whatsappSupport;
-          setWhatsappSupport(prev =>
-            JSON.stringify(prev) === JSON.stringify(nextWa) ? prev : nextWa
-          );
-        }
-      }
-    } catch {
-      // Network hiccup — retry on next poll
-    }
-  }, [activePortal, adminToken, userToken, apiCall, applyAdminState, applyUserState]);
-
-  // Initial hydration + portal switch refresh
+  // Listen to Firebase Auth state
   useEffect(() => {
+    const unsub = onAuthStateChanged(auth, user => {
+      setFbAuthUser(user);
+      if (!user) {
+        setAdminUser(null);
+        setCurrentUser(null);
+        setUsers([]);
+        setBets([]);
+        setTransactions([]);
+        setDeposits([]);
+        setWithdrawals([]);
+        setCoinLogs([]);
+      }
+      setIsHydrating(false);
+    });
+    return () => unsub();
+  }, []);
+
+  // Public predictions + WhatsApp support subscription (always live)
+  useEffect(() => {
+    const unsub = subscribePublicData({
+      onPredictions: preds => setPredictions(preds),
+      onWhatsAppSupport: cfg => setWhatsappSupport(prev => (JSON.stringify(prev) === JSON.stringify(cfg) ? prev : cfg))
+    });
+    return () => unsub();
+  }, []);
+
+  // Portal-specific Firestore subscriptions when Firebase Auth is ready
+  useEffect(() => {
+    if (!fbAuthUser) return;
     let active = true;
+    let portalUnsub: (() => void) | undefined;
+
     (async () => {
-      await refreshState();
-      if (active) setIsHydrating(false);
+      if (activePortal === 'admin') {
+        const isAdmin = await checkIsFirebaseAdmin(fbAuthUser);
+        if (!active) return;
+        if (!isAdmin) {
+          setAdminUser(null);
+          return;
+        }
+        await seedInitialFirestoreIfNeeded();
+        if (!active) return;
+        setAdminUser({
+          id: 'usr_admin',
+          username: fbAuthUser.email?.split('@')[0] || 'admin',
+          passwordHash: '',
+          fullName: fbAuthUser.displayName || 'System Administrator',
+          email: fbAuthUser.email || BOOTSTRAPPED_ADMIN_EMAIL,
+          coins: 999999,
+          status: 'active',
+          createdAt: new Date().toISOString()
+        });
+        portalUnsub = subscribeAdminPortalData({
+          onUsers: u => setUsers(u),
+          onBets: b => setBets(b),
+          onTransactions: t => setTransactions(t),
+          onDeposits: d => setDeposits(d),
+          onWithdrawals: w => setWithdrawals(w),
+          onCoinLogs: l => setCoinLogs(l),
+          onPaymentGateway: cfg =>
+            setPaymentGateway(prev => (JSON.stringify(prev) === JSON.stringify(cfg) ? prev : cfg))
+        });
+      } else {
+        let resolvedUserId = activeUserId;
+        if (!resolvedUserId) {
+          try {
+            const q = query(collection(db, 'users'), where('ownerUid', '==', fbAuthUser.uid), limit(1));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+              resolvedUserId = snap.docs[0].id;
+              safeSetStorage(STORAGE_KEYS.USER_DOC_ID, resolvedUserId);
+              if (active) setActiveUserId(resolvedUserId);
+            }
+          } catch {
+            // No linked user yet; wait for explicit login
+          }
+        }
+        if (!active || !resolvedUserId) return;
+
+        portalUnsub = subscribeUserPortalData(fbAuthUser.uid, resolvedUserId, {
+          onUser: u => {
+            if (!u || u.status === 'suspended') {
+              setCurrentUser(null);
+              if (!u) {
+                safeRemoveStorage(STORAGE_KEYS.USER_DOC_ID);
+                setActiveUserId(null);
+              }
+              return;
+            }
+            setCurrentUser(u);
+          },
+          onBets: b => setBets(b),
+          onTransactions: t => setTransactions(t),
+          onDeposits: d => setDeposits(d),
+          onWithdrawals: w => setWithdrawals(w),
+          onPaymentGateway: cfg =>
+            setPaymentGateway(prev => (JSON.stringify(prev) === JSON.stringify(cfg) ? prev : cfg))
+        });
+      }
     })();
+
     return () => {
       active = false;
+      if (portalUnsub) portalUnsub();
     };
-  }, [refreshState]);
-
-  // Live sync polling across devices (every 5s + window focus)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      refreshState();
-    }, 5000);
-    const onFocus = () => refreshState();
-    window.addEventListener('focus', onFocus);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, [refreshState]);
+  }, [fbAuthUser, activePortal, activeUserId]);
 
   // Platform Stats
   const regularUsers = users.filter(u => u.id !== 'usr_admin');
@@ -409,88 +351,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // --- Auth Functions ---
 
   const loginUser = async (username: string, pass: string): Promise<ActionResult> => {
-    try {
-      const res = await apiCall<{ token?: string; state?: UserStatePayload }>('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password: pass })
-      });
-      if (!res.ok || !res.data.success || !res.data.token || !res.data.state) {
-        return { success: false, error: res.data.error || 'Invalid credentials' };
-      }
-      safeSetStorage(STORAGE_KEYS.USER_TOKEN, res.data.token);
-      setUserToken(res.data.token);
-      applyUserState(res.data.state);
-      setActivePortal('user');
-      return { success: true };
-    } catch {
-      return { success: false, error: 'Unable to reach server. Please try again.' };
+    const res = await signInUserWithGoogleOrClaim(username, pass);
+    if (!res.success || !res.userId) {
+      return { success: false, error: res.error || 'Invalid credentials' };
     }
+    safeSetStorage(STORAGE_KEYS.USER_DOC_ID, res.userId);
+    setActiveUserId(res.userId);
+    setActivePortal('user');
+    return { success: true };
   };
 
-  const loginAdmin = async (username: string, pass: string): Promise<ActionResult> => {
-    try {
-      const res = await apiCall<{ token?: string; state?: AdminStatePayload }>('/api/auth/admin-login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password: pass })
-      });
-      if (!res.ok || !res.data.success || !res.data.token || !res.data.state) {
-        return { success: false, error: res.data.error || 'Invalid administrator credentials' };
-      }
-      safeSetStorage(STORAGE_KEYS.ADMIN_TOKEN, res.data.token);
-      setAdminToken(res.data.token);
-      applyAdminState(res.data.state);
-      setActivePortal('admin');
-      return { success: true };
-    } catch {
-      return { success: false, error: 'Unable to reach server. Please try again.' };
+  const loginUserWithGoogle = async (): Promise<ActionResult> => {
+    const res = await signInUserWithGoogleOrClaim();
+    if (!res.success || !res.userId) {
+      return { success: false, error: res.error || 'Google sign-in failed' };
     }
+    safeSetStorage(STORAGE_KEYS.USER_DOC_ID, res.userId);
+    setActiveUserId(res.userId);
+    setActivePortal('user');
+    return { success: true };
+  };
+
+  const loginAdminWithGoogle = async (): Promise<ActionResult> => {
+    const res = await signInAdminWithGoogle();
+    if (!res.success || !res.admin) {
+      return { success: false, error: res.error || 'Administrator sign-in failed' };
+    }
+    setAdminUser(res.admin);
+    setActivePortal('admin');
+    return { success: true };
+  };
+
+  const loginAdmin = async (_username: string, _pass: string): Promise<ActionResult> => {
+    return loginAdminWithGoogle();
   };
 
   const logout = () => {
-    if (activePortal === 'admin') {
-      safeRemoveStorage(STORAGE_KEYS.ADMIN_TOKEN);
-      setAdminToken(null);
-      setAdminUser(null);
-      setUsers([]);
-      setCoinLogs([]);
-    } else {
-      safeRemoveStorage(STORAGE_KEYS.USER_TOKEN);
-      setUserToken(null);
-      setCurrentUser(null);
-      setBets([]);
-      setTransactions([]);
-      setDeposits([]);
-      setWithdrawals([]);
-    }
+    safeRemoveStorage(STORAGE_KEYS.USER_DOC_ID);
+    setActiveUserId(null);
+    setCurrentUser(null);
+    setAdminUser(null);
+    void logoutFirebase();
   };
 
-  const changePassword = async (_userId: string, oldPass: string, newPass: string): Promise<ActionResult> => {
-    const res = await apiCall(
-      '/api/user/change-password',
-      { method: 'POST', body: JSON.stringify({ oldPassword: oldPass, newPassword: newPass }) },
-      userToken
-    );
-    return { success: !!res.data.success, error: res.data.error };
+  const changePassword = async (_userId: string, _oldPass: string, newPass: string): Promise<ActionResult> => {
+    if (!currentUser) return { success: false, error: 'Not signed in' };
+    return fsResetUserPassword(currentUser, newPass);
   };
 
   const changeAdminCredentials = async (
-    currentPassword: string,
-    newPassword: string,
-    newUsername?: string
+    _currentPassword: string,
+    _newPassword: string,
+    _newUsername?: string
   ): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      '/api/admin/change-password',
-      {
-        method: 'POST',
-        body: JSON.stringify({ currentPassword, newPassword, newUsername })
-      },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
-    }
-    return { success: false, error: res.data.error || 'Failed to update admin credentials' };
+    return {
+      success: false,
+      error: `Admin authentication is managed via Google Sign-In (${BOOTSTRAPPED_ADMIN_EMAIL}).`
+    };
   };
 
   // --- User Actions ---
@@ -500,16 +417,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     choice: 'YES' | 'NO',
     amount: number
   ): Promise<ActionResult & { betId?: string }> => {
-    const res = await apiCall<{ betId?: string; state?: UserStatePayload }>(
-      '/api/user/bets',
-      { method: 'POST', body: JSON.stringify({ predictionId, choice, amount }) },
-      userToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyUserState(res.data.state);
-      return { success: true, betId: res.data.betId };
+    if (!fbAuthUser || !currentUser) return { success: false, error: 'Please sign in first' };
+    const pred = predictions.find(p => p.id === predictionId);
+    if (!pred) return { success: false, error: 'Prediction market not found' };
+    try {
+      return await fsPlaceBet(fbAuthUser.uid, currentUser, pred, choice, amount);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to place prediction' };
     }
-    return { success: false, error: res.data.error || 'Failed to place prediction' };
   };
 
   const requestDeposit = async (
@@ -518,16 +433,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     referenceNumber: string,
     notes?: string
   ): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: UserStatePayload }>(
-      '/api/user/deposits',
-      { method: 'POST', body: JSON.stringify({ amount, paymentMethod, referenceNumber, notes }) },
-      userToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyUserState(res.data.state);
-      return { success: true };
+    if (!fbAuthUser || !currentUser) return { success: false, error: 'Please sign in first' };
+    try {
+      return await fsRequestDeposit(fbAuthUser.uid, currentUser, amount, paymentMethod, referenceNumber, notes);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to submit deposit request' };
     }
-    return { success: false, error: res.data.error || 'Failed to submit deposit request' };
   };
 
   const requestWithdrawal = async (
@@ -535,19 +446,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     payoutMethod: string,
     payoutDetails: string
   ): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: UserStatePayload }>(
-      '/api/user/withdrawals',
-      { method: 'POST', body: JSON.stringify({ amount, payoutMethod, payoutDetails }) },
-      userToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyUserState(res.data.state);
-      return { success: true };
+    if (!fbAuthUser || !currentUser) return { success: false, error: 'Please sign in first' };
+    try {
+      return await fsRequestWithdrawal(fbAuthUser.uid, currentUser, amount, payoutMethod, payoutDetails);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to submit withdrawal request' };
     }
-    return { success: false, error: res.data.error || 'Failed to submit withdrawal request' };
   };
 
-  // --- Admin Actions - Users ---
+  // --- Admin Actions ---
 
   const createUser = async (data: {
     username: string;
@@ -558,71 +465,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     initialCoins?: number;
     notes?: string;
   }): Promise<ActionResult & { user?: User }> => {
-    const res = await apiCall<{ user?: User; state?: AdminStatePayload }>(
-      '/api/admin/users',
-      { method: 'POST', body: JSON.stringify(data) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true, user: res.data.user };
+    try {
+      return await fsCreateUser(data);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to create user' };
     }
-    return { success: false, error: res.data.error || 'Failed to create user account' };
   };
 
   const updateUser = async (userId: string, data: Partial<User>): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/users/${encodeURIComponent(userId)}`,
-      { method: 'PATCH', body: JSON.stringify(data) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
+    try {
+      return await fsUpdateUser(userId, data);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to update user' };
     }
-    return { success: false, error: res.data.error || 'Failed to update user' };
   };
 
   const toggleUserStatus = async (userId: string): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/users/${encodeURIComponent(userId)}/toggle-status`,
-      { method: 'POST' },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
+    const user = users.find(u => u.id === userId);
+    if (!user) return { success: false, error: 'User not found' };
+    try {
+      return await fsToggleUserStatus(user);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to update user status' };
     }
-    return { success: false, error: res.data.error || 'Failed to toggle user status' };
   };
 
   const resetUserPassword = async (userId: string, newPass: string): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/users/${encodeURIComponent(userId)}/reset-password`,
-      { method: 'POST', body: JSON.stringify({ newPassword: newPass }) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
+    const user = users.find(u => u.id === userId);
+    if (!user) return { success: false, error: 'User not found' };
+    try {
+      return await fsResetUserPassword(user, newPass);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to reset password' };
     }
-    return { success: false, error: res.data.error || 'Failed to reset password' };
   };
 
   const deleteUser = async (userId: string): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/users/${encodeURIComponent(userId)}`,
-      { method: 'DELETE' },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
+    const user = users.find(u => u.id === userId);
+    if (!user) return { success: false, error: 'User not found' };
+    try {
+      return await fsDeleteUser(user);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to delete user' };
     }
-    return { success: false, error: res.data.error || 'Failed to delete user' };
   };
-
-  // --- Admin Actions - Coins ---
 
   const adjustUserCoins = async (
     userId: string,
@@ -630,122 +516,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     amount: number,
     reason: string
   ): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/users/${encodeURIComponent(userId)}/coins`,
-      { method: 'POST', body: JSON.stringify({ type, amount, reason }) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
+    const target = users.find(u => u.id === userId);
+    if (!target || !adminUser) return { success: false, error: 'User or Admin not found' };
+    try {
+      return await fsAdjustUserCoins(adminUser, target, type, amount, reason);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to adjust coins' };
     }
-    return { success: false, error: res.data.error || 'Failed to adjust coins' };
   };
-
-  // --- Admin Actions - Predictions ---
 
   const createPrediction = async (
     data: Omit<Prediction, 'id' | 'createdAt' | 'totalYesVolume' | 'totalNoVolume' | 'totalParticipants' | 'outcome'>
   ): Promise<ActionResult & { prediction?: Prediction }> => {
-    const res = await apiCall<{ prediction?: Prediction; state?: AdminStatePayload }>(
-      '/api/admin/predictions',
-      { method: 'POST', body: JSON.stringify(data) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true, prediction: res.data.prediction };
+    try {
+      return await fsCreatePrediction(data);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to create prediction' };
     }
-    return { success: false, error: res.data.error || 'Failed to create prediction' };
   };
 
   const updatePrediction = async (id: string, data: Partial<Prediction>): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/predictions/${encodeURIComponent(id)}`,
-      { method: 'PATCH', body: JSON.stringify(data) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
+    try {
+      return await fsUpdatePrediction(id, data);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to update prediction' };
     }
-    return { success: false, error: res.data.error || 'Failed to update prediction' };
   };
 
   const setPredictionStatus = async (id: string, status: PredictionStatus): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/predictions/${encodeURIComponent(id)}/status`,
-      { method: 'POST', body: JSON.stringify({ status }) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
-    }
-    return { success: false, error: res.data.error || 'Failed to update status' };
+    return updatePrediction(id, { status });
   };
 
   const deletePrediction = async (
     id: string
   ): Promise<ActionResult & { refundedCount?: number; refundedTotal?: number }> => {
-    const res = await apiCall<{ refundedCount?: number; refundedTotal?: number; state?: AdminStatePayload }>(
-      `/api/admin/predictions/${encodeURIComponent(id)}`,
-      { method: 'DELETE' },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return {
-        success: true,
-        refundedCount: res.data.refundedCount,
-        refundedTotal: res.data.refundedTotal
-      };
+    try {
+      return await fsDeletePrediction(id, bets, users);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to delete prediction' };
     }
-    return { success: false, error: res.data.error || 'Failed to delete prediction' };
   };
 
   const settlePrediction = async (
     predictionId: string,
     outcome: 'YES' | 'NO' | 'VOID'
   ): Promise<ActionResult & { winnersCount: number; totalPayout: number }> => {
-    const res = await apiCall<{ winnersCount?: number; totalPayout?: number; state?: AdminStatePayload }>(
-      `/api/admin/predictions/${encodeURIComponent(predictionId)}/settle`,
-      { method: 'POST', body: JSON.stringify({ outcome }) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
+    try {
+      return await fsSettlePrediction(predictionId, outcome, adminUser?.username || 'admin', bets, users);
+    } catch (err) {
       return {
-        success: true,
-        winnersCount: res.data.winnersCount || 0,
-        totalPayout: res.data.totalPayout || 0
+        success: false,
+        error: err instanceof Error ? err.message : 'Failed to settle prediction',
+        winnersCount: 0,
+        totalPayout: 0
       };
     }
-    return {
-      success: false,
-      error: res.data.error || 'Failed to settle prediction',
-      winnersCount: 0,
-      totalPayout: 0
-    };
   };
-
-  // --- Admin Actions - Financial Requests & Payment Gateway ---
 
   const reviewDeposit = async (
     depositId: string,
     action: 'approve' | 'reject',
     adminRemark?: string
   ): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/deposits/${encodeURIComponent(depositId)}/review`,
-      { method: 'POST', body: JSON.stringify({ action, adminRemark }) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
+    const dep = deposits.find(d => d.id === depositId);
+    if (!dep) return { success: false, error: 'Deposit not found' };
+    const targetUser = users.find(u => u.id === dep.userId);
+    try {
+      return await fsReviewDeposit(dep, action, adminUser?.username || 'admin', targetUser, adminRemark);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to review deposit' };
     }
-    return { success: false, error: res.data.error || 'Failed to review deposit' };
   };
 
   const reviewWithdrawal = async (
@@ -753,52 +593,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     action: 'approve' | 'reject' | 'processing',
     adminRemark?: string
   ): Promise<ActionResult> => {
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/withdrawals/${encodeURIComponent(withdrawalId)}/review`,
-      { method: 'POST', body: JSON.stringify({ action, adminRemark }) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state);
-      return { success: true };
+    const wdr = withdrawals.find(w => w.id === withdrawalId);
+    if (!wdr) return { success: false, error: 'Withdrawal not found' };
+    const targetUser = users.find(u => u.id === wdr.userId);
+    try {
+      return await fsReviewWithdrawal(wdr, action, adminUser?.username || 'admin', targetUser, adminRemark);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to review withdrawal' };
     }
-    return { success: false, error: res.data.error || 'Failed to review withdrawal' };
   };
 
   const updateGlobalPaymentGateway = async (config: Omit<PaymentGatewayConfig, 'updatedAt'>): Promise<ActionResult> => {
-    stateEpochRef.current += 1;
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      '/api/admin/payment-gateway',
-      { method: 'PUT', body: JSON.stringify(config) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state, true);
-      return { success: true };
+    try {
+      return await fsUpdateGlobalPaymentGateway(config);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to update payment gateway' };
     }
-    return { success: false, error: res.data.error || 'Failed to update payment gateway' };
   };
 
   const updateUserPaymentGateway = async (
     userId: string,
     config: Omit<PaymentGatewayConfig, 'updatedAt'> | null
   ): Promise<ActionResult> => {
-    stateEpochRef.current += 1;
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      `/api/admin/users/${encodeURIComponent(userId)}/payment-gateway`,
-      { method: 'PUT', body: JSON.stringify({ config }) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state, true);
-      return { success: true };
+    try {
+      return await fsUpdateUserPaymentGateway(userId, config);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to update user gateway' };
     }
-    return { success: false, error: res.data.error || 'Failed to update user payment gateway' };
   };
 
   const getEffectivePaymentGateway = (userId?: string): PaymentGatewayConfig => {
     if (activePortal === 'user' && currentUser && (!userId || userId === currentUser.id)) {
-      return userEffectiveGateway;
+      if (currentUser.customPaymentGateway && currentUser.customPaymentGateway.channels.length > 0) {
+        return currentUser.customPaymentGateway;
+      }
+      return paymentGateway;
     }
     if (userId) {
       const user = users.find(u => u.id === userId);
@@ -810,17 +639,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateWhatsAppSupport = async (config: Omit<WhatsAppSupportConfig, 'updatedAt'>): Promise<ActionResult> => {
-    stateEpochRef.current += 1;
-    const res = await apiCall<{ state?: AdminStatePayload }>(
-      '/api/admin/whatsapp-support',
-      { method: 'PUT', body: JSON.stringify(config) },
-      adminToken
-    );
-    if (res.ok && res.data.success && res.data.state) {
-      applyAdminState(res.data.state, true);
-      return { success: true };
+    try {
+      return await fsUpdateWhatsAppSupport(config);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to update WhatsApp support' };
     }
-    return { success: false, error: res.data.error || 'Failed to update WhatsApp support settings' };
   };
 
   return (
@@ -832,7 +655,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adminUser,
         isHydrating,
         loginUser,
+        loginUserWithGoogle,
         loginAdmin,
+        loginAdminWithGoogle,
         logout,
         changePassword,
         changeAdminCredentials,

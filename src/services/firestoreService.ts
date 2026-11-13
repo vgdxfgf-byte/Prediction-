@@ -1,0 +1,1393 @@
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  limit,
+  onSnapshot,
+  setDoc,
+  updateDoc,
+  writeBatch,
+  serverTimestamp,
+  Timestamp,
+  type Unsubscribe
+} from 'firebase/firestore';
+import { signInWithPopup, signOut, type User as FirebaseAuthUser } from 'firebase/auth';
+import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../firebase';
+import type {
+  User,
+  Prediction,
+  Bet,
+  Transaction,
+  DepositRequest,
+  WithdrawalRequest,
+  CoinAdjustmentLog,
+  PaymentGatewayConfig,
+  WhatsAppSupportConfig,
+  PredictionStatus
+} from '../types';
+
+export const BOOTSTRAPPED_ADMIN_EMAIL = 'vgdxfgf@gmail.com';
+
+function toIso(value: unknown): string {
+  if (!value) return new Date().toISOString();
+  if (value instanceof Timestamp) return value.toDate().toISOString();
+  if (typeof value === 'object' && value !== null && 'toDate' in value && typeof (value as { toDate: () => Date }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+  if (typeof value === 'string') return value;
+  return new Date().toISOString();
+}
+
+export function sanitizeId(raw: string): string {
+  const cleaned = raw.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+  return cleaned.slice(0, 128) || `id_${Date.now()}`;
+}
+
+export function normalizeUsername(raw: string): string {
+  return raw.trim().replace(/^@+/, '');
+}
+
+function mapUserDoc(id: string, data: Record<string, unknown>): User {
+  return {
+    id: String(data.id || id),
+    username: String(data.username || ''),
+    passwordHash: '',
+    fullName: String(data.fullName || 'Player'),
+    coins: Number(data.coins ?? 0),
+    status: data.status === 'suspended' ? 'suspended' : 'active',
+    createdAt: toIso(data.createdAt),
+    lastLogin: data.lastLogin ? String(data.lastLogin) : undefined,
+    notes: data.notes ? String(data.notes) : undefined,
+    customPaymentGateway: (data.customPaymentGateway as PaymentGatewayConfig | null | undefined) ?? null
+  };
+}
+
+function mapPredictionDoc(id: string, data: Record<string, unknown>): Prediction {
+  return {
+    id: String(data.id || id),
+    title: String(data.title || ''),
+    subtitle: String(data.subtitle || ''),
+    category: data.category as Prediction['category'],
+    yesOdds: Number(data.yesOdds ?? 1.9),
+    noOdds: Number(data.noOdds ?? 1.9),
+    minBet: Number(data.minBet ?? 50),
+    maxBet: Number(data.maxBet ?? 5000),
+    closingTime: String(data.closingTime || new Date().toISOString()),
+    status: (data.status as PredictionStatus) || 'open',
+    outcome: (data.outcome as Prediction['outcome']) ?? null,
+    totalYesVolume: Number(data.totalYesVolume ?? 0),
+    totalNoVolume: Number(data.totalNoVolume ?? 0),
+    totalParticipants: Number(data.totalParticipants ?? 0),
+    createdAt: toIso(data.createdAt),
+    settledAt: data.settledAt ? String(data.settledAt) : undefined,
+    settledBy: data.settledBy ? String(data.settledBy) : undefined,
+    iconName: data.iconName ? String(data.iconName) : undefined,
+    description: data.description ? String(data.description) : undefined
+  };
+}
+
+function mapBetDoc(id: string, data: Record<string, unknown>): Bet {
+  return {
+    id: String(data.id || id),
+    userId: String(data.userId || ''),
+    username: String(data.username || ''),
+    predictionId: String(data.predictionId || ''),
+    predictionTitle: String(data.predictionTitle || ''),
+    predictionCategory: data.predictionCategory as Bet['predictionCategory'],
+    choice: data.choice === 'NO' ? 'NO' : 'YES',
+    odds: Number(data.odds ?? 1),
+    amount: Number(data.amount ?? 0),
+    potentialWinnings: Number(data.potentialWinnings ?? 0),
+    actualWinnings: Number(data.actualWinnings ?? 0),
+    result: (data.result as Bet['result']) || 'pending',
+    createdAt: toIso(data.createdAt),
+    settledAt: data.settledAt ? String(data.settledAt) : undefined,
+    transactionId: String(data.transactionId || '')
+  };
+}
+
+function mapTransactionDoc(id: string, data: Record<string, unknown>): Transaction {
+  return {
+    id: String(data.id || id),
+    userId: String(data.userId || ''),
+    username: String(data.username || ''),
+    type: data.type as Transaction['type'],
+    amount: Number(data.amount ?? 0),
+    balanceBefore: Number(data.balanceBefore ?? 0),
+    balanceAfter: Number(data.balanceAfter ?? 0),
+    status: (data.status as Transaction['status']) || 'completed',
+    description: String(data.description || ''),
+    createdAt: toIso(data.createdAt),
+    referenceId: data.referenceId ? String(data.referenceId) : undefined
+  };
+}
+
+function mapDepositDoc(id: string, data: Record<string, unknown>): DepositRequest {
+  return {
+    id: String(data.id || id),
+    userId: String(data.userId || ''),
+    username: String(data.username || ''),
+    amount: Number(data.amount ?? 0),
+    paymentMethod: String(data.paymentMethod || ''),
+    referenceNumber: String(data.referenceNumber || ''),
+    notes: data.notes ? String(data.notes) : undefined,
+    status: (data.status as DepositRequest['status']) || 'pending',
+    createdAt: toIso(data.createdAt),
+    reviewedAt: data.reviewedAt ? String(data.reviewedAt) : undefined,
+    reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
+    adminRemark: data.adminRemark ? String(data.adminRemark) : undefined
+  };
+}
+
+function mapWithdrawalDoc(id: string, data: Record<string, unknown>): WithdrawalRequest {
+  return {
+    id: String(data.id || id),
+    userId: String(data.userId || ''),
+    username: String(data.username || ''),
+    amount: Number(data.amount ?? 0),
+    payoutMethod: String(data.payoutMethod || ''),
+    payoutDetails: String(data.payoutDetails || ''),
+    status: (data.status as WithdrawalRequest['status']) || 'pending',
+    createdAt: toIso(data.createdAt),
+    reviewedAt: data.reviewedAt ? String(data.reviewedAt) : undefined,
+    reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
+    adminRemark: data.adminRemark ? String(data.adminRemark) : undefined
+  };
+}
+
+function mapCoinLogDoc(id: string, data: Record<string, unknown>): CoinAdjustmentLog {
+  return {
+    id: String(data.id || id),
+    userId: String(data.userId || ''),
+    username: String(data.username || ''),
+    adminId: String(data.adminId || ''),
+    adminUsername: String(data.adminUsername || ''),
+    type: (data.type as CoinAdjustmentLog['type']) || 'credit',
+    amount: Number(data.amount ?? 0),
+    previousBalance: Number(data.previousBalance ?? 0),
+    newBalance: Number(data.newBalance ?? 0),
+    reason: String(data.reason || ''),
+    createdAt: toIso(data.createdAt)
+  };
+}
+
+function formatAuthError(err: unknown): string {
+  const code = (err as { code?: string })?.code || '';
+  if (code === 'auth/popup-closed-by-user') return 'Google sign-in popup was closed. Please try again.';
+  if (code === 'auth/popup-blocked') return 'Popup was blocked by your browser. Please allow popups and try again.';
+  if (code === 'auth/unauthorized-domain') {
+    return `This domain (${window.location.hostname}) must be added under Firebase Console → Authentication → Settings → Authorized domains.`;
+  }
+  if (err instanceof Error) return err.message;
+  return 'Authentication failed. Please try again.';
+}
+
+export async function checkIsFirebaseAdmin(authUser: FirebaseAuthUser): Promise<boolean> {
+  if (!authUser.emailVerified) return false;
+  if (authUser.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) return true;
+  try {
+    const snap = await getDoc(doc(db, 'admins', authUser.uid));
+    return snap.exists();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, `admins/${authUser.uid}`);
+  }
+}
+
+export async function seedInitialFirestoreIfNeeded(): Promise<void> {
+  const gwRef = doc(db, 'settings', 'paymentGateway');
+  let gwSnap;
+  try {
+    gwSnap = await getDoc(gwRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, 'settings/paymentGateway');
+  }
+  if (gwSnap.exists()) return;
+
+  const batch = writeBatch(db);
+  const now = Date.now();
+
+  batch.set(gwRef, {
+    title: 'Official Admin Payment Gateway',
+    instructions:
+      'Transfer your exact amount to any active Official Admin Payment Gateway channel below, then enter your transaction reference ID.',
+    channels: [
+      { id: 'gw_upi', label: 'Admin UPI ID', value: 'apexpredict@icici', enabled: true },
+      { id: 'gw_usdt', label: 'USDT TRC-20', value: 'TX9vK7m842jqp1y38aG98kL', enabled: true },
+      {
+        id: 'gw_bank',
+        label: 'Bank Account / IMPS',
+        value: 'ApexPredict Holdings • A/C 9028174650 • IFSC ICIC0001042',
+        enabled: false
+      }
+    ],
+    updatedAt: serverTimestamp()
+  });
+
+  batch.set(doc(db, 'settings', 'whatsappSupport'), {
+    enabled: true,
+    phoneNumber: '',
+    buttonLabel: 'WhatsApp Support',
+    defaultMessage: 'Hello Admin, I need assistance with my ApexPredict account.',
+    updatedAt: serverTimestamp()
+  });
+
+  batch.set(doc(db, 'predictions', 'pred_1'), {
+    id: 'pred_1',
+    title: "Will India win today's cricket match against Australia?",
+    subtitle: 'Border-Gavaskar Trophy - Match 2, Melbourne',
+    category: 'Cricket',
+    yesOdds: 1.85,
+    noOdds: 2.15,
+    minBet: 50,
+    maxBet: 5000,
+    closingTime: new Date(now + 24 * 3600 * 1000).toISOString(),
+    status: 'open',
+    outcome: null,
+    totalYesVolume: 0,
+    totalNoVolume: 0,
+    totalParticipants: 0,
+    iconName: 'trophy',
+    description:
+      'Match resolves to YES if India wins outright. In case of tie/draw or rain washout without result, bets will be refunded.',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  batch.set(doc(db, 'predictions', 'pred_2'), {
+    id: 'pred_2',
+    title: "Will Real Madrid win today's UEFA Champions League clash?",
+    subtitle: 'UEFA Champions League - Real Madrid vs Bayern Munich',
+    category: 'Football',
+    yesOdds: 2.1,
+    noOdds: 1.78,
+    minBet: 50,
+    maxBet: 10000,
+    closingTime: new Date(now + 36 * 3600 * 1000).toISOString(),
+    status: 'open',
+    outcome: null,
+    totalYesVolume: 0,
+    totalNoVolume: 0,
+    totalParticipants: 0,
+    iconName: 'flame',
+    description: 'Official 90 minutes + injury time result.',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  batch.set(doc(db, 'users', 'usr_alex'), {
+    id: 'usr_alex',
+    username: 'alex_sports',
+    fullName: 'Alex Morgan',
+    coins: 2450,
+    status: 'active',
+    ownerUid: null,
+    notes: 'Demo player account',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  batch.set(doc(db, 'account_claims', 'alex_sports'), {
+    userId: 'usr_alex',
+    username: 'alex_sports',
+    accessCode: 'user123',
+    claimedByUid: null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  try {
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'seedInitialFirestore');
+  }
+}
+
+export async function signInAdminWithGoogle(): Promise<{ success: boolean; error?: string; admin?: User }> {
+  try {
+    const cred = await signInWithPopup(auth, googleProvider);
+    const isAdmin = await checkIsFirebaseAdmin(cred.user);
+    if (!isAdmin) {
+      await signOut(auth);
+      return {
+        success: false,
+        error: `Access denied for ${cred.user.email || 'this account'}. Sign in with ${BOOTSTRAPPED_ADMIN_EMAIL} for Admin access.`
+      };
+    }
+    await seedInitialFirestoreIfNeeded();
+    return {
+      success: true,
+      admin: {
+        id: 'usr_admin',
+        username: cred.user.email?.split('@')[0] || 'admin',
+        passwordHash: '',
+        fullName: cred.user.displayName || 'System Administrator',
+        email: cred.user.email || BOOTSTRAPPED_ADMIN_EMAIL,
+        coins: 999999,
+        status: 'active',
+        createdAt: new Date().toISOString()
+      }
+    };
+  } catch (err) {
+    return { success: false, error: formatAuthError(err) };
+  }
+}
+
+export async function signInUserWithGoogleOrClaim(
+  usernameInput?: string,
+  passwordInput?: string
+): Promise<{ success: boolean; error?: string; userId?: string }> {
+  try {
+    let authUser = auth.currentUser;
+    if (!authUser || !authUser.emailVerified) {
+      const cred = await signInWithPopup(auth, googleProvider);
+      authUser = cred.user;
+    }
+
+    const cleanUsername = normalizeUsername(usernameInput || '');
+    const cleanPassword = (passwordInput || '').trim();
+
+    if (cleanUsername) {
+      const claimKey = sanitizeId(cleanUsername.toLowerCase());
+      const claimRef = doc(db, 'account_claims', claimKey);
+      let claimSnap;
+      try {
+        claimSnap = await getDoc(claimRef);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, `account_claims/${claimKey}`);
+      }
+
+      if (!claimSnap.exists()) {
+        return { success: false, error: 'Invalid username or password' };
+      }
+
+      const claimData = claimSnap.data();
+      if (String(claimData.accessCode || '').trim() !== cleanPassword) {
+        return { success: false, error: 'Invalid username or password' };
+      }
+
+      if (claimData.claimedByUid && claimData.claimedByUid !== authUser.uid) {
+        return { success: false, error: 'This username is already linked to another Google account.' };
+      }
+
+      const targetUserId = String(claimData.userId);
+      const userRef = doc(db, 'users', targetUserId);
+      const nowIso = new Date().toISOString();
+
+      if (!claimData.claimedByUid) {
+        const batch = writeBatch(db);
+        batch.update(claimRef, {
+          claimedByUid: authUser.uid,
+          updatedAt: serverTimestamp()
+        });
+        batch.update(userRef, {
+          ownerUid: authUser.uid,
+          lastLogin: nowIso,
+          updatedAt: serverTimestamp()
+        });
+        try {
+          await batch.commit();
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `users/${targetUserId}`);
+        }
+      } else {
+        let userSnap;
+        try {
+          userSnap = await getDoc(userRef);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, `users/${targetUserId}`);
+        }
+        if (!userSnap.exists()) {
+          return { success: false, error: 'Account no longer exists' };
+        }
+        if (userSnap.data().status === 'suspended') {
+          return { success: false, error: 'This account has been suspended by the administrator' };
+        }
+        try {
+          await updateDoc(userRef, { lastLogin: nowIso, updatedAt: serverTimestamp() });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `users/${targetUserId}`);
+        }
+      }
+
+      return { success: true, userId: targetUserId };
+    }
+
+    // 1-tap Google login: find existing profile by ownerUid or create one
+    const usersQ = query(collection(db, 'users'), where('ownerUid', '==', authUser.uid), limit(1));
+    let usersSnap;
+    try {
+      usersSnap = await getDocs(usersQ);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, 'users');
+    }
+
+    const nowIso = new Date().toISOString();
+    if (!usersSnap.empty) {
+      const existingDoc = usersSnap.docs[0];
+      if (existingDoc.data().status === 'suspended') {
+        return { success: false, error: 'This account has been suspended by the administrator' };
+      }
+      try {
+        await updateDoc(existingDoc.ref, { lastLogin: nowIso, updatedAt: serverTimestamp() });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `users/${existingDoc.id}`);
+      }
+      return { success: true, userId: existingDoc.id };
+    }
+
+    const rawHandle = (authUser.email?.split('@')[0] || authUser.displayName || 'player').toLowerCase();
+    const safeUsername = sanitizeId(rawHandle).slice(0, 28);
+    const finalUsername = safeUsername.length >= 2 ? safeUsername : `player_${authUser.uid.slice(0, 6)}`;
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'users', authUser.uid), {
+      id: authUser.uid,
+      username: finalUsername,
+      fullName: (authUser.displayName || finalUsername).slice(0, 100),
+      coins: 0,
+      status: 'active',
+      ownerUid: authUser.uid,
+      lastLogin: nowIso,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    batch.set(doc(db, 'users', authUser.uid, 'private', 'info'), {
+      ownerUid: authUser.uid,
+      email: (authUser.email || '').slice(0, 160),
+      updatedAt: serverTimestamp()
+    });
+    try {
+      await batch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${authUser.uid}`);
+    }
+    return { success: true, userId: authUser.uid };
+  } catch (err) {
+    return { success: false, error: formatAuthError(err) };
+  }
+}
+
+export async function logoutFirebase(): Promise<void> {
+  await signOut(auth);
+}
+
+// --- Real-time Subscriptions ---
+
+export function subscribePublicData(handlers: {
+  onPredictions: (preds: Prediction[]) => void;
+  onWhatsAppSupport: (cfg: WhatsAppSupportConfig) => void;
+}): Unsubscribe {
+  const unsubPreds = onSnapshot(
+    collection(db, 'predictions'),
+    snap => {
+      const list = snap.docs
+        .map(d => mapPredictionDoc(d.id, d.data()))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      handlers.onPredictions(list);
+    },
+    error => {
+      handleFirestoreError(error, OperationType.LIST, 'predictions');
+    }
+  );
+
+  const unsubWa = onSnapshot(
+    doc(db, 'settings', 'whatsappSupport'),
+    snap => {
+      if (snap.exists()) {
+        const d = snap.data();
+        handlers.onWhatsAppSupport({
+          enabled: Boolean(d.enabled),
+          phoneNumber: String(d.phoneNumber || ''),
+          buttonLabel: String(d.buttonLabel || 'WhatsApp Support'),
+          defaultMessage: String(d.defaultMessage || 'Hello Admin, I need assistance with my ApexPredict account.'),
+          updatedAt: toIso(d.updatedAt)
+        });
+      }
+    },
+    error => {
+      handleFirestoreError(error, OperationType.GET, 'settings/whatsappSupport');
+    }
+  );
+
+  return () => {
+    unsubPreds();
+    unsubWa();
+  };
+}
+
+export function subscribeUserPortalData(
+  authUid: string,
+  userId: string,
+  handlers: {
+    onUser: (user: User | null) => void;
+    onBets: (bets: Bet[]) => void;
+    onTransactions: (txs: Transaction[]) => void;
+    onDeposits: (deps: DepositRequest[]) => void;
+    onWithdrawals: (wdrs: WithdrawalRequest[]) => void;
+    onPaymentGateway: (cfg: PaymentGatewayConfig) => void;
+  }
+): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+
+  unsubs.push(
+    onSnapshot(
+      doc(db, 'users', userId),
+      snap => {
+        if (!snap.exists()) {
+          handlers.onUser(null);
+          return;
+        }
+        handlers.onUser(mapUserDoc(snap.id, snap.data()));
+      },
+      error => handleFirestoreError(error, OperationType.GET, `users/${userId}`)
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'bets'), where('ownerUid', '==', authUid)),
+      snap => {
+        handlers.onBets(
+          snap.docs.map(d => mapBetDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'bets')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'transactions'), where('ownerUid', '==', authUid)),
+      snap => {
+        handlers.onTransactions(
+          snap.docs.map(d => mapTransactionDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'transactions')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'deposits'), where('ownerUid', '==', authUid)),
+      snap => {
+        handlers.onDeposits(
+          snap.docs.map(d => mapDepositDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'deposits')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      query(collection(db, 'withdrawals'), where('ownerUid', '==', authUid)),
+      snap => {
+        handlers.onWithdrawals(
+          snap.docs.map(d => mapWithdrawalDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'withdrawals')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      doc(db, 'settings', 'paymentGateway'),
+      snap => {
+        if (snap.exists()) {
+          const d = snap.data();
+          handlers.onPaymentGateway({
+            title: String(d.title || 'Official Admin Payment Gateway'),
+            instructions: String(d.instructions || ''),
+            channels: Array.isArray(d.channels) ? d.channels : [],
+            updatedAt: toIso(d.updatedAt)
+          });
+        }
+      },
+      error => handleFirestoreError(error, OperationType.GET, 'settings/paymentGateway')
+    )
+  );
+
+  return () => {
+    unsubs.forEach(u => u());
+  };
+}
+
+export function subscribeAdminPortalData(handlers: {
+  onUsers: (users: User[]) => void;
+  onBets: (bets: Bet[]) => void;
+  onTransactions: (txs: Transaction[]) => void;
+  onDeposits: (deps: DepositRequest[]) => void;
+  onWithdrawals: (wdrs: WithdrawalRequest[]) => void;
+  onCoinLogs: (logs: CoinAdjustmentLog[]) => void;
+  onPaymentGateway: (cfg: PaymentGatewayConfig) => void;
+}): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+
+  unsubs.push(
+    onSnapshot(
+      collection(db, 'users'),
+      snap => {
+        handlers.onUsers(
+          snap.docs.map(d => mapUserDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'users')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      collection(db, 'bets'),
+      snap => {
+        handlers.onBets(
+          snap.docs.map(d => mapBetDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'bets')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      collection(db, 'transactions'),
+      snap => {
+        handlers.onTransactions(
+          snap.docs.map(d => mapTransactionDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'transactions')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      collection(db, 'deposits'),
+      snap => {
+        handlers.onDeposits(
+          snap.docs.map(d => mapDepositDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'deposits')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      collection(db, 'withdrawals'),
+      snap => {
+        handlers.onWithdrawals(
+          snap.docs.map(d => mapWithdrawalDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'withdrawals')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      collection(db, 'coinLogs'),
+      snap => {
+        handlers.onCoinLogs(
+          snap.docs.map(d => mapCoinLogDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        );
+      },
+      error => handleFirestoreError(error, OperationType.LIST, 'coinLogs')
+    )
+  );
+
+  unsubs.push(
+    onSnapshot(
+      doc(db, 'settings', 'paymentGateway'),
+      snap => {
+        if (snap.exists()) {
+          const d = snap.data();
+          handlers.onPaymentGateway({
+            title: String(d.title || 'Official Admin Payment Gateway'),
+            instructions: String(d.instructions || ''),
+            channels: Array.isArray(d.channels) ? d.channels : [],
+            updatedAt: toIso(d.updatedAt)
+          });
+        }
+      },
+      error => handleFirestoreError(error, OperationType.GET, 'settings/paymentGateway')
+    )
+  );
+
+  return () => {
+    unsubs.forEach(u => u());
+  };
+}
+
+// --- User Actions ---
+
+export async function fsPlaceBet(
+  authUid: string,
+  user: User,
+  prediction: Prediction,
+  choice: 'YES' | 'NO',
+  amount: number
+): Promise<{ success: boolean; error?: string; betId?: string }> {
+  if (prediction.status !== 'open') return { success: false, error: 'Market is not open for predictions' };
+  if (!Number.isFinite(amount) || amount < prediction.minBet || amount > prediction.maxBet) {
+    return { success: false, error: `Amount must be between ${prediction.minBet} and ${prediction.maxBet}` };
+  }
+  if (user.coins < amount) return { success: false, error: 'Insufficient coin balance' };
+
+  const odds = choice === 'YES' ? prediction.yesOdds : prediction.noOdds;
+  const betId = `bet_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const txId = `tx_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const newBalance = user.coins - amount;
+  const potentialWinnings = Math.round(amount * odds);
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'users', user.id), {
+    coins: newBalance,
+    updatedAt: serverTimestamp()
+  });
+  batch.set(doc(db, 'bets', betId), {
+    id: betId,
+    userId: user.id,
+    ownerUid: authUid,
+    username: user.username,
+    predictionId: prediction.id,
+    predictionTitle: prediction.title.slice(0, 240),
+    predictionCategory: prediction.category,
+    choice,
+    odds,
+    amount,
+    potentialWinnings,
+    actualWinnings: 0,
+    result: 'pending',
+    transactionId: txId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+  batch.set(doc(db, 'transactions', txId), {
+    id: txId,
+    userId: user.id,
+    ownerUid: authUid,
+    username: user.username,
+    type: 'bet_placed',
+    amount: -amount,
+    balanceBefore: user.coins,
+    balanceAfter: newBalance,
+    status: 'completed',
+    description: `Stake on "${prediction.title.slice(0, 60)}" (${choice} @ ${odds}x)`.slice(0, 300),
+    referenceId: betId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+  batch.update(doc(db, 'predictions', prediction.id), {
+    totalYesVolume: choice === 'YES' ? prediction.totalYesVolume + amount : prediction.totalYesVolume,
+    totalNoVolume: choice === 'NO' ? prediction.totalNoVolume + amount : prediction.totalNoVolume,
+    totalParticipants: prediction.totalParticipants + 1,
+    updatedAt: serverTimestamp()
+  });
+
+  try {
+    await batch.commit();
+    return { success: true, betId };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `bets/${betId}`);
+  }
+}
+
+export async function fsRequestDeposit(
+  authUid: string,
+  user: User,
+  amount: number,
+  paymentMethod: string,
+  referenceNumber: string,
+  notes?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: 'Amount must be greater than 0' };
+  if (!referenceNumber.trim()) return { success: false, error: 'Payment reference number is required' };
+  const depId = `dep_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  try {
+    await setDoc(doc(db, 'deposits', depId), {
+      id: depId,
+      userId: user.id,
+      ownerUid: authUid,
+      username: user.username,
+      amount,
+      paymentMethod: (paymentMethod.trim() || 'UPI Transfer').slice(0, 120),
+      referenceNumber: referenceNumber.trim().slice(0, 120),
+      notes: notes ? notes.trim().slice(0, 400) : '',
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `deposits/${depId}`);
+  }
+}
+
+export async function fsRequestWithdrawal(
+  authUid: string,
+  user: User,
+  amount: number,
+  payoutMethod: string,
+  payoutDetails: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: 'Amount must be greater than 0' };
+  if (amount > user.coins) return { success: false, error: `Insufficient balance. Available: ${user.coins} coins` };
+  if (!payoutDetails.trim()) return { success: false, error: 'Payout address or bank details required' };
+
+  const wdrId = `wdr_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const txId = `tx_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const newBalance = user.coins - amount;
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'users', user.id), {
+    coins: newBalance,
+    updatedAt: serverTimestamp()
+  });
+  batch.set(doc(db, 'withdrawals', wdrId), {
+    id: wdrId,
+    userId: user.id,
+    ownerUid: authUid,
+    username: user.username,
+    amount,
+    payoutMethod: (payoutMethod.trim() || 'UPI Payout').slice(0, 120),
+    payoutDetails: payoutDetails.trim().slice(0, 300),
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+  batch.set(doc(db, 'transactions', txId), {
+    id: txId,
+    userId: user.id,
+    ownerUid: authUid,
+    username: user.username,
+    type: 'withdrawal',
+    amount: -amount,
+    balanceBefore: user.coins,
+    balanceAfter: newBalance,
+    status: 'pending',
+    description: `Withdrawal request (${payoutMethod.trim() || 'UPI'})`.slice(0, 300),
+    referenceId: wdrId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  try {
+    await batch.commit();
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `withdrawals/${wdrId}`);
+  }
+}
+
+// --- Admin Actions ---
+
+export async function fsCreateUser(data: {
+  username: string;
+  password: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  initialCoins?: number;
+  notes?: string;
+}): Promise<{ success: boolean; error?: string; user?: User }> {
+  const cleanUsername = normalizeUsername(data.username);
+  const cleanPassword = data.password.trim();
+  const cleanFullName = data.fullName.trim();
+
+  if (cleanUsername.length < 2 || cleanUsername.length > 64) {
+    return { success: false, error: 'Username must be between 2 and 64 characters' };
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(cleanUsername)) {
+    return { success: false, error: 'Username can only contain letters, numbers, underscores, and hyphens' };
+  }
+  if (cleanPassword.length < 4) {
+    return { success: false, error: 'Password must be at least 4 characters' };
+  }
+  if (!cleanFullName) {
+    return { success: false, error: 'Full name is required' };
+  }
+
+  const claimKey = cleanUsername.toLowerCase();
+  const claimRef = doc(db, 'account_claims', claimKey);
+  let existingClaim;
+  try {
+    existingClaim = await getDoc(claimRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, `account_claims/${claimKey}`);
+  }
+  if (existingClaim.exists()) {
+    return { success: false, error: 'Username already exists' };
+  }
+
+  const userId = `usr_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const coins = Math.max(0, Number(data.initialCoins) || 0);
+  const batch = writeBatch(db);
+
+  batch.set(doc(db, 'users', userId), {
+    id: userId,
+    username: cleanUsername,
+    fullName: cleanFullName.slice(0, 100),
+    coins,
+    status: 'active',
+    ownerUid: null,
+    notes: data.notes ? data.notes.trim().slice(0, 500) : '',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  batch.set(claimRef, {
+    userId,
+    username: cleanUsername,
+    accessCode: cleanPassword.slice(0, 64),
+    claimedByUid: null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  if (data.email || data.phone) {
+    batch.set(doc(db, 'users', userId, 'private', 'info'), {
+      ownerUid: null,
+      email: data.email ? data.email.trim().slice(0, 160) : '',
+      phone: data.phone ? data.phone.trim().slice(0, 40) : '',
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  try {
+    await batch.commit();
+    return {
+      success: true,
+      user: {
+        id: userId,
+        username: cleanUsername,
+        passwordHash: '',
+        fullName: cleanFullName,
+        email: data.email?.trim(),
+        phone: data.phone?.trim(),
+        coins,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        notes: data.notes?.trim()
+      }
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `users/${userId}`);
+  }
+}
+
+export async function fsUpdateUser(userId: string, data: Partial<User>): Promise<{ success: boolean; error?: string }> {
+  const updates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (typeof data.fullName === 'string' && data.fullName.trim()) updates.fullName = data.fullName.trim().slice(0, 100);
+  if (typeof data.notes === 'string') updates.notes = data.notes.trim().slice(0, 500);
+  if (data.status === 'active' || data.status === 'suspended') updates.status = data.status;
+
+  try {
+    await updateDoc(doc(db, 'users', userId), updates);
+    if (typeof data.email === 'string' || typeof data.phone === 'string') {
+      await setDoc(
+        doc(db, 'users', userId, 'private', 'info'),
+        {
+          ...(typeof data.email === 'string' ? { email: data.email.trim().slice(0, 160) } : {}),
+          ...(typeof data.phone === 'string' ? { phone: data.phone.trim().slice(0, 40) } : {}),
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    }
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `users/${userId}`);
+  }
+}
+
+export async function fsToggleUserStatus(user: User): Promise<{ success: boolean; error?: string }> {
+  const nextStatus = user.status === 'active' ? 'suspended' : 'active';
+  try {
+    await updateDoc(doc(db, 'users', user.id), {
+      status: nextStatus,
+      updatedAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `users/${user.id}`);
+  }
+}
+
+export async function fsResetUserPassword(user: User, newPass: string): Promise<{ success: boolean; error?: string }> {
+  const clean = newPass.trim();
+  if (clean.length < 4) return { success: false, error: 'Password must be at least 4 characters' };
+  const claimKey = sanitizeId(user.username.toLowerCase());
+  try {
+    await updateDoc(doc(db, 'account_claims', claimKey), {
+      accessCode: clean.slice(0, 64),
+      updatedAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `account_claims/${claimKey}`);
+  }
+}
+
+export async function fsDeleteUser(user: User): Promise<{ success: boolean; error?: string }> {
+  const claimKey = sanitizeId(user.username.toLowerCase());
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'users', user.id));
+  batch.delete(doc(db, 'account_claims', claimKey));
+  try {
+    await batch.commit();
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `users/${user.id}`);
+  }
+}
+
+export async function fsAdjustUserCoins(
+  adminUser: User,
+  targetUser: User,
+  type: 'credit' | 'debit' | 'set',
+  amount: number,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  const amt = Math.max(0, Number(amount) || 0);
+  const prev = targetUser.coins;
+  let next = prev;
+  if (type === 'credit') next = prev + amt;
+  else if (type === 'debit') next = Math.max(0, prev - amt);
+  else next = amt;
+
+  const logId = `clog_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const batch = writeBatch(db);
+
+  batch.update(doc(db, 'users', targetUser.id), {
+    coins: next,
+    updatedAt: serverTimestamp()
+  });
+
+  batch.set(doc(db, 'coinLogs', logId), {
+    id: logId,
+    userId: targetUser.id,
+    username: targetUser.username,
+    adminId: adminUser.id || 'usr_admin',
+    adminUsername: adminUser.username || 'admin',
+    type,
+    amount: amt,
+    previousBalance: prev,
+    newBalance: next,
+    reason: (reason.trim() || 'Admin adjustment').slice(0, 300),
+    createdAt: serverTimestamp()
+  });
+
+  try {
+    await batch.commit();
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `users/${targetUser.id}`);
+  }
+}
+
+export async function fsCreatePrediction(
+  data: Omit<Prediction, 'id' | 'createdAt' | 'totalYesVolume' | 'totalNoVolume' | 'totalParticipants' | 'outcome'>
+): Promise<{ success: boolean; error?: string; prediction?: Prediction }> {
+  const id = `pred_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const payload = {
+    id,
+    title: data.title.trim().slice(0, 240),
+    subtitle: data.subtitle.trim().slice(0, 200),
+    category: data.category,
+    yesOdds: Number(data.yesOdds),
+    noOdds: Number(data.noOdds),
+    minBet: Number(data.minBet),
+    maxBet: Number(data.maxBet),
+    closingTime: data.closingTime,
+    status: data.status || 'open',
+    outcome: null,
+    totalYesVolume: 0,
+    totalNoVolume: 0,
+    totalParticipants: 0,
+    iconName: data.iconName || 'trophy',
+    description: data.description ? data.description.slice(0, 1000) : '',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+
+  try {
+    await setDoc(doc(db, 'predictions', id), payload);
+    return {
+      success: true,
+      prediction: {
+        ...data,
+        id,
+        outcome: null,
+        totalYesVolume: 0,
+        totalNoVolume: 0,
+        totalParticipants: 0,
+        createdAt: new Date().toISOString()
+      }
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `predictions/${id}`);
+  }
+}
+
+export async function fsUpdatePrediction(id: string, data: Partial<Prediction>): Promise<{ success: boolean; error?: string }> {
+  const updates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (typeof data.title === 'string') updates.title = data.title.trim().slice(0, 240);
+  if (typeof data.subtitle === 'string') updates.subtitle = data.subtitle.trim().slice(0, 200);
+  if (data.category) updates.category = data.category;
+  if (typeof data.yesOdds === 'number') updates.yesOdds = data.yesOdds;
+  if (typeof data.noOdds === 'number') updates.noOdds = data.noOdds;
+  if (typeof data.minBet === 'number') updates.minBet = data.minBet;
+  if (typeof data.maxBet === 'number') updates.maxBet = data.maxBet;
+  if (typeof data.closingTime === 'string') updates.closingTime = data.closingTime;
+  if (typeof data.description === 'string') updates.description = data.description.slice(0, 1000);
+  if (data.status) updates.status = data.status;
+
+  try {
+    await updateDoc(doc(db, 'predictions', id), updates);
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `predictions/${id}`);
+  }
+}
+
+export async function fsDeletePrediction(
+  id: string,
+  bets: Bet[],
+  users: User[]
+): Promise<{ success: boolean; error?: string; refundedCount: number; refundedTotal: number }> {
+  const pendingBets = bets.filter(b => b.predictionId === id && b.result === 'pending');
+  let refundedCount = 0;
+  let refundedTotal = 0;
+  const userCoins = new Map<string, number>(users.map(u => [u.id, u.coins]));
+
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'predictions', id));
+
+  for (const bet of pendingBets) {
+    batch.update(doc(db, 'bets', bet.id), {
+      result: 'voided',
+      actualWinnings: bet.amount,
+      settledAt: new Date().toISOString(),
+      updatedAt: serverTimestamp()
+    });
+    const cur = userCoins.get(bet.userId);
+    if (cur !== undefined) {
+      userCoins.set(bet.userId, cur + bet.amount);
+    }
+    refundedCount += 1;
+    refundedTotal += bet.amount;
+  }
+
+  for (const [uid, nextCoins] of userCoins.entries()) {
+    const orig = users.find(u => u.id === uid);
+    if (orig && orig.coins !== nextCoins) {
+      batch.update(doc(db, 'users', uid), { coins: nextCoins, updatedAt: serverTimestamp() });
+    }
+  }
+
+  try {
+    await batch.commit();
+    return { success: true, refundedCount, refundedTotal };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `predictions/${id}`);
+  }
+}
+
+export async function fsSettlePrediction(
+  predictionId: string,
+  outcome: 'YES' | 'NO' | 'VOID',
+  adminUsername: string,
+  bets: Bet[],
+  users: User[]
+): Promise<{ success: boolean; error?: string; winnersCount: number; totalPayout: number }> {
+  const nowIso = new Date().toISOString();
+  const pendingBets = bets.filter(b => b.predictionId === predictionId && b.result === 'pending');
+  const userCoins = new Map<string, number>(users.map(u => [u.id, u.coins]));
+  let winnersCount = 0;
+  let totalPayout = 0;
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'predictions', predictionId), {
+    status: 'settled',
+    outcome,
+    settledAt: nowIso,
+    settledBy: adminUsername.slice(0, 64),
+    updatedAt: serverTimestamp()
+  });
+
+  for (const bet of pendingBets) {
+    if (outcome === 'VOID') {
+      batch.update(doc(db, 'bets', bet.id), {
+        result: 'voided',
+        actualWinnings: bet.amount,
+        settledAt: nowIso,
+        updatedAt: serverTimestamp()
+      });
+      const cur = userCoins.get(bet.userId);
+      if (cur !== undefined) userCoins.set(bet.userId, cur + bet.amount);
+    } else if (bet.choice === outcome) {
+      batch.update(doc(db, 'bets', bet.id), {
+        result: 'won',
+        actualWinnings: bet.potentialWinnings,
+        settledAt: nowIso,
+        updatedAt: serverTimestamp()
+      });
+      const cur = userCoins.get(bet.userId);
+      if (cur !== undefined) userCoins.set(bet.userId, cur + bet.potentialWinnings);
+      winnersCount += 1;
+      totalPayout += bet.potentialWinnings;
+    } else {
+      batch.update(doc(db, 'bets', bet.id), {
+        result: 'lost',
+        actualWinnings: 0,
+        settledAt: nowIso,
+        updatedAt: serverTimestamp()
+      });
+    }
+  }
+
+  for (const [uid, nextCoins] of userCoins.entries()) {
+    const orig = users.find(u => u.id === uid);
+    if (orig && orig.coins !== nextCoins) {
+      batch.update(doc(db, 'users', uid), { coins: nextCoins, updatedAt: serverTimestamp() });
+    }
+  }
+
+  try {
+    await batch.commit();
+    return { success: true, winnersCount, totalPayout };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `predictions/${predictionId}`);
+  }
+}
+
+export async function fsReviewDeposit(
+  deposit: DepositRequest,
+  action: 'approve' | 'reject',
+  adminUsername: string,
+  targetUser: User | undefined,
+  adminRemark?: string
+): Promise<{ success: boolean; error?: string }> {
+  const status = action === 'approve' ? 'approved' : 'rejected';
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'deposits', deposit.id), {
+    status,
+    reviewedAt: new Date().toISOString(),
+    reviewedBy: adminUsername.slice(0, 64),
+    adminRemark: adminRemark ? adminRemark.trim().slice(0, 400) : '',
+    updatedAt: serverTimestamp()
+  });
+
+  if (action === 'approve' && targetUser) {
+    batch.update(doc(db, 'users', targetUser.id), {
+      coins: targetUser.coins + deposit.amount,
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  try {
+    await batch.commit();
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `deposits/${deposit.id}`);
+  }
+}
+
+export async function fsReviewWithdrawal(
+  withdrawal: WithdrawalRequest,
+  action: 'approve' | 'reject' | 'processing',
+  adminUsername: string,
+  targetUser: User | undefined,
+  adminRemark?: string
+): Promise<{ success: boolean; error?: string }> {
+  const status = action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'processing';
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'withdrawals', withdrawal.id), {
+    status,
+    reviewedAt: new Date().toISOString(),
+    reviewedBy: adminUsername.slice(0, 64),
+    adminRemark: adminRemark ? adminRemark.trim().slice(0, 400) : '',
+    updatedAt: serverTimestamp()
+  });
+
+  if (action === 'reject' && targetUser) {
+    batch.update(doc(db, 'users', targetUser.id), {
+      coins: targetUser.coins + withdrawal.amount,
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  try {
+    await batch.commit();
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `withdrawals/${withdrawal.id}`);
+  }
+}
+
+export async function fsUpdateGlobalPaymentGateway(
+  config: Omit<PaymentGatewayConfig, 'updatedAt'>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await setDoc(doc(db, 'settings', 'paymentGateway'), {
+      title: (config.title || 'Official Admin Payment Gateway').trim().slice(0, 120),
+      instructions: (config.instructions || '').trim().slice(0, 1000),
+      channels: (config.channels || []).slice(0, 20).map(c => ({
+        id: c.id || `gw_${Date.now()}`,
+        label: String(c.label || '').trim(),
+        value: String(c.value || '').trim(),
+        enabled: c.enabled !== false
+      })),
+      updatedAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'settings/paymentGateway');
+  }
+}
+
+export async function fsUpdateUserPaymentGateway(
+  userId: string,
+  config: Omit<PaymentGatewayConfig, 'updatedAt'> | null
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await updateDoc(doc(db, 'users', userId), {
+      customPaymentGateway: config
+        ? {
+            title: (config.title || 'Assigned Payment Gateway').trim().slice(0, 120),
+            instructions: (config.instructions || '').trim().slice(0, 1000),
+            channels: (config.channels || []).slice(0, 20),
+            updatedAt: new Date().toISOString()
+          }
+        : null,
+      updatedAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `users/${userId}`);
+  }
+}
+
+export async function fsUpdateWhatsAppSupport(
+  config: Omit<WhatsAppSupportConfig, 'updatedAt'>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await setDoc(doc(db, 'settings', 'whatsappSupport'), {
+      enabled: Boolean(config.enabled),
+      phoneNumber: (config.phoneNumber || '').trim().slice(0, 40),
+      buttonLabel: (config.buttonLabel || 'WhatsApp Support').trim().slice(0, 60),
+      defaultMessage: (config.defaultMessage || 'Hello Admin, I need assistance with my ApexPredict account.')
+        .trim()
+        .slice(0, 300),
+      updatedAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'settings/whatsappSupport');
+  }
+}

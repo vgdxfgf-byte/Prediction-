@@ -1,0 +1,258 @@
+{
+  "entities": {
+    "AdminMember": {
+      "title": "AdminMember",
+      "description": "Authorized administrator allowlist entry keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "minLength": 3, "maxLength": 160 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Player account profile and coin balance.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "coins": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "lastLogin": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "username", "fullName", "coins", "status", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII (email, phone, custom gateway) for a user.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["updatedAt"]
+    },
+    "AccountClaim": {
+      "title": "AccountClaim",
+      "description": "Admin-issued username and access code allowing a verified player to claim their account.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "accessCode": { "type": "string", "minLength": 4, "maxLength": 64 },
+        "claimedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "accessCode", "createdAt", "updatedAt"]
+    },
+    "PlatformSetting": {
+      "title": "PlatformSetting",
+      "description": "Global platform configuration (paymentGateway or whatsappSupport).",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 120 },
+        "instructions": { "type": "string", "maxLength": 1000 },
+        "channels": { "type": "array" },
+        "enabled": { "type": "boolean" },
+        "phoneNumber": { "type": "string", "maxLength": 40 },
+        "buttonLabel": { "type": "string", "maxLength": 60 },
+        "defaultMessage": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["updatedAt"]
+    },
+    "Prediction": {
+      "title": "Prediction",
+      "description": "YES/NO sports or event prediction market.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 3, "maxLength": 240 },
+        "subtitle": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "category": { "type": "string", "enum": ["Cricket", "Football", "Basketball", "Tennis", "Esports", "Crypto & Finance"] },
+        "yesOdds": { "type": "number" },
+        "noOdds": { "type": "number" },
+        "minBet": { "type": "number" },
+        "maxBet": { "type": "number" },
+        "closingTime": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["open", "paused", "closed", "settled"] },
+        "outcome": { "type": "string", "maxLength": 16 },
+        "totalYesVolume": { "type": "number" },
+        "totalNoVolume": { "type": "number" },
+        "totalParticipants": { "type": "number" },
+        "settledAt": { "type": "string", "maxLength": 64 },
+        "settledBy": { "type": "string", "maxLength": 64 },
+        "iconName": { "type": "string", "maxLength": 40 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "subtitle", "category", "yesOdds", "noOdds", "minBet", "maxBet", "closingTime", "status", "totalYesVolume", "totalNoVolume", "totalParticipants", "createdAt", "updatedAt"]
+    },
+    "Bet": {
+      "title": "Bet",
+      "description": "User prediction slip placed on a market.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "predictionId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "predictionTitle": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "predictionCategory": { "type": "string", "enum": ["Cricket", "Football", "Basketball", "Tennis", "Esports", "Crypto & Finance"] },
+        "choice": { "type": "string", "enum": ["YES", "NO"] },
+        "odds": { "type": "number" },
+        "amount": { "type": "number" },
+        "potentialWinnings": { "type": "number" },
+        "actualWinnings": { "type": "number" },
+        "result": { "type": "string", "enum": ["pending", "won", "lost", "voided"] },
+        "transactionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "settledAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "ownerUid", "username", "predictionId", "predictionTitle", "predictionCategory", "choice", "odds", "amount", "potentialWinnings", "actualWinnings", "result", "transactionId", "createdAt", "updatedAt"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Immutable coin ledger record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "type": { "type": "string", "enum": ["deposit", "withdrawal", "bet_placed", "bet_won", "bet_refund", "admin_credit", "admin_debit"] },
+        "amount": { "type": "number" },
+        "balanceBefore": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "completed", "rejected", "processing"] },
+        "description": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "ownerUid", "username", "type", "amount", "balanceBefore", "balanceAfter", "status", "description", "createdAt", "updatedAt"]
+    },
+    "DepositRequest": {
+      "title": "DepositRequest",
+      "description": "Coin deposit request submitted by a user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "referenceNumber": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 400 },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "reviewedAt": { "type": "string", "maxLength": 64 },
+        "reviewedBy": { "type": "string", "maxLength": 64 },
+        "adminRemark": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "ownerUid", "username", "amount", "paymentMethod", "referenceNumber", "status", "createdAt", "updatedAt"]
+    },
+    "WithdrawalRequest": {
+      "title": "WithdrawalRequest",
+      "description": "Coin withdrawal request submitted by a user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "amount": { "type": "number" },
+        "payoutMethod": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "payoutDetails": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "status": { "type": "string", "enum": ["pending", "processing", "approved", "rejected"] },
+        "reviewedAt": { "type": "string", "maxLength": 64 },
+        "reviewedBy": { "type": "string", "maxLength": 64 },
+        "adminRemark": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "ownerUid", "username", "amount", "payoutMethod", "payoutDetails", "status", "createdAt", "updatedAt"]
+    },
+    "CoinAdjustmentLog": {
+      "title": "CoinAdjustmentLog",
+      "description": "Admin audit trail for manual coin adjustments.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "adminId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adminUsername": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "type": { "type": "string", "enum": ["credit", "debit", "set"] },
+        "amount": { "type": "number" },
+        "previousBalance": { "type": "number" },
+        "newBalance": { "type": "number" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "username", "adminId", "adminUsername", "type", "amount", "previousBalance", "newBalance", "reason", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminMember" },
+      "description": "Authorized admin UIDs."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/PlatformSetting" },
+      "description": "Global platform gateway and WhatsApp support settings."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Player profiles and coin balances."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Isolated user PII (email, phone)."
+    },
+    "/account_claims/{usernameKey}": {
+      "schema": { "$ref": "#/entities/AccountClaim" },
+      "description": "Admin-issued username claim records."
+    },
+    "/predictions/{predictionId}": {
+      "schema": { "$ref": "#/entities/Prediction" },
+      "description": "Public YES/NO prediction markets."
+    },
+    "/bets/{betId}": {
+      "schema": { "$ref": "#/entities/Bet" },
+      "description": "User prediction slips."
+    },
+    "/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "User coin ledger records."
+    },
+    "/deposits/{depositId}": {
+      "schema": { "$ref": "#/entities/DepositRequest" },
+      "description": "User deposit requests."
+    },
+    "/withdrawals/{withdrawalId}": {
+      "schema": { "$ref": "#/entities/WithdrawalRequest" },
+      "description": "User withdrawal requests."
+    },
+    "/coinLogs/{logId}": {
+      "schema": { "$ref": "#/entities/CoinAdjustmentLog" },
+      "description": "Admin coin audit logs."
+    }
+  }
+}

@@ -3,8 +3,6 @@ import { motion } from 'motion/react';
 import { useApp } from '../../context/AppContext';
 import {
   ShieldCheck,
-  Lock,
-  User as UserIcon,
   AlertCircle,
   KeyRound
 } from 'lucide-react';
@@ -14,19 +12,15 @@ interface AdminLoginProps {
 }
 
 export const AdminLogin: React.FC<AdminLoginProps> = ({ onGoToUserApp }) => {
-  const { loginAdmin } = useApp();
+  const { loginAdminWithGoogle } = useApp();
 
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleAdminLogin = async () => {
     setErrorMsg('');
     setIsLoading(true);
-
-    const res = await loginAdmin(username, password);
+    const res = await loginAdminWithGoogle();
     setIsLoading(false);
     if (!res.success) {
       setErrorMsg(res.error || 'Invalid administrator credentials');
@@ -71,68 +65,27 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onGoToUserApp }) => {
             </span>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            {/* Admin Username */}
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-300 block">
-                Admin Username
-              </label>
-              <div className="relative">
-                <UserIcon className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                <input
-                  type="text"
-                  required
-                  autoComplete="username"
-                  placeholder="Enter admin username"
-                  value={username}
-                  onChange={e => {
-                    setUsername(e.target.value);
-                    setErrorMsg('');
-                  }}
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-700 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
-                />
-              </div>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Sign in with your authorized Administrator Google account to manage users, coin balances, UPI payment gateways, markets, and withdrawals across all devices in real time.
+          </p>
+
+          {errorMsg && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
             </div>
+          )}
 
-            {/* Admin Password */}
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-300 block">
-                Admin Password
-              </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                <input
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  placeholder="Enter admin password"
-                  value={password}
-                  onChange={e => {
-                    setPassword(e.target.value);
-                    setErrorMsg('');
-                  }}
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-700 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
-                />
-              </div>
-            </div>
-
-            {errorMsg && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            <motion.button
-              type="submit"
-              whileTap={{ scale: 0.98 }}
-              disabled={isLoading}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 disabled:opacity-60 text-slate-950 font-bold text-xs uppercase tracking-wider shadow-lg shadow-amber-950/50 flex items-center justify-center gap-1.5 transition cursor-pointer"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>{isLoading ? 'Authenticating...' : 'Enter Admin Control Panel'}</span>
-            </motion.button>
-          </form>
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.98 }}
+            disabled={isLoading}
+            onClick={handleGoogleAdminLogin}
+            className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 disabled:opacity-60 text-slate-950 font-bold text-xs uppercase tracking-wider shadow-lg shadow-amber-950/50 flex items-center justify-center gap-2 transition cursor-pointer"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>{isLoading ? 'Authenticating...' : 'Sign In as Admin with Google'}</span>
+          </motion.button>
         </div>
 
         {/* Back link */}
