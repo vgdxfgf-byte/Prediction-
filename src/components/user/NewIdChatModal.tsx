@@ -12,15 +12,19 @@ import {
   User as UserIcon,
   Phone,
   Sparkles,
-  LogIn
+  LogIn,
+  ImagePlus,
+  ZoomIn
 } from 'lucide-react';
 import {
   generateSecureChatId,
+  getUserSupportChatId,
   subscribeIdChatThread,
   subscribeIdChatMessages,
   fsSendVisitorIdChatMessage,
   fsMarkIdChatRead
 } from '../../services/firestoreService';
+import { compressChatImage } from '../../utils/imageCompression';
 import type { IdChatThread, IdChatMessage } from '../../types';
 
 export const ID_CHAT_STORAGE_KEY = 'apex_id_chat_session_v1';
@@ -55,10 +59,17 @@ function saveStoredChatSession(session: StoredChatSession) {
   }
 }
 
+interface LoggedInChatUser {
+  id: string;
+  username: string;
+  fullName: string;
+}
+
 interface NewIdChatModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultVisitorName?: string;
+  loggedInUser?: LoggedInChatUser | null;
   onApplyCredentials?: (username: string, password: string) => void;
 }
 
@@ -66,9 +77,10 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
   isOpen,
   onClose,
   defaultVisitorName,
+  loggedInUser,
   onApplyCredentials
 }) => {
-  const [session, setSession] = useState<StoredChatSession>(() => {
+  const [guestSession, setGuestSession] = useState<StoredChatSession>(() => {
     const existing = loadStoredChatSession();
     if (existing) return existing;
     const fresh: StoredChatSession = {
@@ -79,12 +91,17 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
     return fresh;
   });
 
+  const activeChatId = loggedInUser
+    ? getUserSupportChatId(loggedInUser.id)
+    : guestSession.chatId;
+
   const [thread, setThread] = useState<IdChatThread | null>(null);
+  const [isThreadCommitted, setIsThreadCommitted] = useState(false);
   const [messages, setMessages] = useState<IdChatMessage[]>([]);
 
-  // Initial intake form state
+  // Initial intake form state (for pre-login visitors)
   const [visitorName, setVisitorName] = useState(
-    () => session.visitorName || defaultVisitorName || ''
+    () => guestSession.visitorName || defaultVisitorName || ''
   );
   const [requestedUsername, setRequestedUsername] = useState('');
   const [contactInfo, setContactInfo] = useState('');
@@ -92,37 +109,51 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
     'Hi Admin, please create a new User ID for me.'
   );
 
-  // Follow-up message input
+  // Composer & photo state
   const [replyText, setReplyText] = useState('');
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Subscribe to thread metadata whenever modal is open
+  // Subscribe to active chat thread metadata whenever modal is open
   useEffect(() => {
     if (!isOpen) return;
-    const unsub = subscribeIdChatThread(session.chatId, nextThread => {
+    setThread(null);
+    setIsThreadCommitted(false);
+    setMessages([]);
+    const unsub = subscribeIdChatThread(activeChatId, (nextThread, meta) => {
       setThread(nextThread);
-      if (nextThread?.unreadByUser) {
-        void fsMarkIdChatRead(session.chatId, 'user');
+      if (!nextThread) {
+        setIsThreadCommitted(false);
+        return;
+      }
+      if (!meta?.hasPendingWrites) {
+        setIsThreadCommitted(true);
+      }
+      if (nextThread.unreadByUser && !meta?.hasPendingWrites) {
+        void fsMarkIdChatRead(activeChatId, 'user');
       }
     });
     return () => unsub();
-  }, [isOpen, session.chatId]);
+  }, [isOpen, activeChatId]);
 
-  // Subscribe to messages only after thread exists in Firestore
+  // Subscribe to messages only after the thread is confirmed on the server
   useEffect(() => {
-    if (!isOpen || !thread) {
-      setMessages([]);
+    if (!isOpen || !thread || !isThreadCommitted) {
+      if (!thread) setMessages([]);
       return;
     }
-    const unsub = subscribeIdChatMessages(session.chatId, list => {
+    const unsub = subscribeIdChatMessages(activeChatId, list => {
       setMessages(list);
     });
     return () => unsub();
-  }, [isOpen, thread?.id, session.chatId]);
+  }, [isOpen, thread?.id, isThreadCommitted, activeChatId]);
 
   // Auto scroll to newest message
   useEffect(() => {
@@ -140,7 +171,24 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
     }
   };
 
-  const handleStartChat = async (e: React.FormEvent) => {
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setErrorMsg('');
+    setIsProcessingPhoto(true);
+    try {
+      const compressed = await compressChatImage(file);
+      setPendingPhoto(compressed);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to attach photo');
+    } finally {
+      setIsProcessingPhoto(false);
+    }
+  };
+
+  const handleStartGuestChat = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     const cleanName = visitorName.trim();
@@ -148,63 +196,81 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
       setErrorMsg('Please enter your name (at least 2 characters).');
       return;
     }
-    if (!firstMessage.trim()) {
-      setErrorMsg('Please write a message for the administrator.');
+    if (!firstMessage.trim() && !pendingPhoto) {
+      setErrorMsg('Please write a message or attach a photo.');
       return;
     }
 
     setIsSending(true);
     const updatedSession: StoredChatSession = {
-      chatId: session.chatId,
+      chatId: guestSession.chatId,
       visitorName: cleanName
     };
     saveStoredChatSession(updatedSession);
-    setSession(updatedSession);
+    setGuestSession(updatedSession);
 
+    const photoToSend = pendingPhoto || undefined;
     const res = await fsSendVisitorIdChatMessage({
-      chatId: session.chatId,
+      chatId: guestSession.chatId,
       visitorName: cleanName,
       requestedUsername: requestedUsername.trim(),
       contactInfo: contactInfo.trim(),
-      text: firstMessage.trim()
+      text: firstMessage.trim(),
+      imageUrl: photoToSend
     });
     setIsSending(false);
 
-    if (!res.success) {
+    if (res.success) {
+      setPendingPhoto(null);
+    } else {
       setErrorMsg(res.error || 'Could not start chat. Please try again.');
     }
   };
 
-  const handleSendFollowUp = async (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!replyText.trim() || isSending) return;
+    if ((!replyText.trim() && !pendingPhoto) || isSending || isProcessingPhoto) return;
     setErrorMsg('');
     setIsSending(true);
 
     const textToSend = replyText.trim();
+    const photoToSend = pendingPhoto || undefined;
     setReplyText('');
+    setPendingPhoto(null);
+
     const res = await fsSendVisitorIdChatMessage({
-      chatId: session.chatId,
-      visitorName: thread?.visitorName || session.visitorName || 'Guest',
-      text: textToSend
+      chatId: activeChatId,
+      userId: loggedInUser?.id,
+      username: loggedInUser?.username,
+      visitorName:
+        loggedInUser?.fullName ||
+        loggedInUser?.username ||
+        thread?.visitorName ||
+        guestSession.visitorName ||
+        'Guest',
+      text: textToSend,
+      imageUrl: photoToSend
     });
     setIsSending(false);
 
     if (!res.success) {
       setReplyText(textToSend);
+      if (photoToSend) setPendingPhoto(photoToSend);
       setErrorMsg(res.error || 'Failed to send message');
     }
   };
 
-  const handleResetChat = () => {
+  const handleResetGuestChat = () => {
     const fresh: StoredChatSession = {
       chatId: generateSecureChatId(),
       visitorName: defaultVisitorName || ''
     };
     saveStoredChatSession(fresh);
-    setSession(fresh);
+    setGuestSession(fresh);
     setThread(null);
+    setIsThreadCommitted(false);
     setMessages([]);
+    setPendingPhoto(null);
     setVisitorName(defaultVisitorName || '');
     setRequestedUsername('');
     setContactInfo('');
@@ -224,14 +290,24 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
             cls: 'text-slate-300 bg-white/[0.06] border-white/[0.12]'
           }
         : {
-            label: 'Live Chat Open',
+            label: 'Live Support',
             cls: 'text-amber-300 bg-amber-500/15 border-amber-500/35'
           };
+
+  const showIntakeForm = !loggedInUser && !thread;
 
   return (
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handlePhotoSelect}
+            className="hidden"
+          />
+
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -248,9 +324,9 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-black text-white truncate">
-                      Chat with Admin for New ID
+                      {loggedInUser ? 'Live Support · Chat with Admin' : 'Chat with Admin for New ID'}
                     </h3>
-                    {thread && (
+                    {(thread || loggedInUser) && (
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded-md border whitespace-nowrap shrink-0 ${statusMeta.cls}`}
                       >
@@ -259,16 +335,18 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
                     )}
                   </div>
                   <p className="text-[11px] text-slate-400 truncate">
-                    Direct live support · Receive your Username & Password right here
+                    {loggedInUser
+                      ? `Signed in as @${loggedInUser.username} · Text & Photo Support`
+                      : 'Direct live chat · Send photos & receive your new ID here'}
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-1.5 shrink-0">
-                {thread && (
+                {!loggedInUser && thread && (
                   <button
                     type="button"
-                    onClick={handleResetChat}
+                    onClick={handleResetGuestChat}
                     title="Start a new ID request chat"
                     className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.06] transition cursor-pointer"
                   >
@@ -287,12 +365,12 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
             </div>
 
             {/* Body */}
-            {!thread ? (
-              <form onSubmit={handleStartChat} className="p-5 space-y-4 overflow-y-auto">
+            {showIntakeForm ? (
+              <form onSubmit={handleStartGuestChat} className="p-5 space-y-4 overflow-y-auto">
                 <div className="p-3.5 rounded-xl bg-[#070c10] border border-[#14e071]/25 text-xs text-slate-300 flex items-start gap-2.5">
                   <Sparkles className="w-4 h-4 text-[#14e071] shrink-0 mt-0.5" />
                   <p className="leading-relaxed">
-                    Tell the administrator your name and preferred username. Once Admin creates your ID, your login credentials will appear live in this chat.
+                    Tell the administrator your name and preferred username. You can also attach a photo, and once Admin creates your ID, your credentials will appear live here.
                   </p>
                 </div>
 
@@ -348,18 +426,48 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300 block">
-                    Message to Admin <span className="text-rose-400">*</span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-300 block">
+                      Message to Admin <span className="text-rose-400">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isProcessingPhoto}
+                      className="text-[11px] font-semibold text-[#14e071] hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                    >
+                      <ImagePlus className="w-3.5 h-3.5" />
+                      {isProcessingPhoto ? 'Compressing...' : 'Attach Photo'}
+                    </button>
+                  </div>
                   <textarea
                     rows={3}
-                    required
                     value={firstMessage}
                     onChange={e => setFirstMessage(e.target.value)}
                     placeholder="Write your ID request or starting coin amount..."
                     className="w-full px-3.5 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white placeholder-slate-500 outline-none transition resize-none"
                   />
                 </div>
+
+                {pendingPhoto && (
+                  <div className="flex items-center gap-3 p-2.5 rounded-xl bg-[#070c10] border border-[#14e071]/35">
+                    <img
+                      src={pendingPhoto}
+                      alt="Attachment preview"
+                      className="w-12 h-12 rounded-lg object-cover border border-white/10"
+                    />
+                    <div className="flex-1 text-[11px] text-slate-300">
+                      Photo ready to send with your request
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPendingPhoto(null)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-white/[0.06] cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
 
                 {errorMsg && (
                   <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
@@ -369,7 +477,7 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
 
                 <button
                   type="submit"
-                  disabled={isSending}
+                  disabled={isSending || isProcessingPhoto}
                   className="w-full py-3 rounded-xl apex-glow-btn disabled:opacity-60 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer"
                 >
                   <Send className="w-4 h-4" />
@@ -381,10 +489,19 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
                 {/* Thread Metadata Bar */}
                 <div className="px-4 py-2 bg-[#080f14] border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
                   <span className="truncate">
-                    Requester: <strong className="text-white">{thread.visitorName}</strong>
-                    {thread.requestedUsername ? ` · Desired: @${thread.requestedUsername}` : ''}
+                    {loggedInUser ? (
+                      <>
+                        Player: <strong className="text-white">{loggedInUser.fullName}</strong> ·{' '}
+                        <span className="text-[#14e071]">@{loggedInUser.username}</span>
+                      </>
+                    ) : (
+                      <>
+                        Requester: <strong className="text-white">{thread?.visitorName}</strong>
+                        {thread?.requestedUsername ? ` · Desired: @${thread.requestedUsername}` : ''}
+                      </>
+                    )}
                   </span>
-                  {thread.issuedUsername && (
+                  {thread?.issuedUsername && (
                     <span className="text-[#14e071] font-semibold font-mono-numbers">
                       Issued: @{thread.issuedUsername}
                     </span>
@@ -392,14 +509,46 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
                 </div>
 
                 {/* Live Messages Stream */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#060b0e]">
-                  {messages.length === 0 ? (
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#060b0e] min-h-[260px]">
+                  {!thread && loggedInUser ? (
+                    <div className="py-6 text-center space-y-3">
+                      <div className="w-11 h-11 rounded-2xl bg-[#14e071]/15 border border-[#14e071]/35 mx-auto flex items-center justify-center">
+                        <Sparkles className="w-5 h-5 text-[#14e071]" />
+                      </div>
+                      <div className="space-y-1 max-w-xs mx-auto">
+                        <h4 className="text-xs font-bold text-white">
+                          Direct Live Chat with Admin
+                        </h4>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Send a message or attach a payment/deposit screenshot below. Admin replies appear here in real time.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1">
+                        {[
+                          'I sent a deposit, attaching screenshot',
+                          'Need help with my withdrawal',
+                          'Please create an extra ID for me'
+                        ].map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setReplyText(preset)}
+                            className="px-2.5 py-1.5 rounded-lg bg-[#0d151b] hover:bg-[#13202a] border border-white/[0.08] text-[11px] text-slate-300 hover:text-[#14e071] transition cursor-pointer"
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : messages.length === 0 ? (
                     <div className="py-10 text-center text-xs text-slate-500">
                       Loading conversation...
                     </div>
                   ) : (
                     messages.map(msg => {
                       const isAdminMsg = msg.senderRole === 'admin';
+                      const showBodyText =
+                        msg.text && !(msg.imageUrl && msg.text === '[Photo]');
                       return (
                         <div
                           key={msg.id}
@@ -414,7 +563,9 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
                           >
                             <div
                               className={`flex items-center justify-between gap-3 text-[10px] ${
-                                isAdminMsg ? 'text-[#14e071] font-bold' : 'text-[#04130b]/75 font-bold'
+                                isAdminMsg
+                                  ? 'text-[#14e071] font-bold'
+                                  : 'text-[#04130b]/75 font-bold'
                               }`}
                             >
                               <span className="flex items-center gap-1">
@@ -429,9 +580,28 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
                               </span>
                             </div>
 
-                            <p className="leading-relaxed whitespace-pre-wrap break-words">
-                              {msg.text}
-                            </p>
+                            {msg.imageUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setLightboxImage(msg.imageUrl!)}
+                                className="relative group block rounded-xl overflow-hidden border border-black/20 cursor-pointer"
+                              >
+                                <img
+                                  src={msg.imageUrl}
+                                  alt="Chat photo"
+                                  className="max-h-56 w-auto rounded-xl object-contain bg-black/40"
+                                />
+                                <span className="absolute bottom-1.5 right-1.5 p-1 rounded-md bg-black/70 text-white opacity-80 group-hover:opacity-100 transition">
+                                  <ZoomIn className="w-3.5 h-3.5" />
+                                </span>
+                              </button>
+                            )}
+
+                            {showBodyText && (
+                              <p className="leading-relaxed whitespace-pre-wrap break-words">
+                                {msg.text}
+                              </p>
+                            )}
 
                             {/* Admin-Issued Credentials Card */}
                             {msg.issuedUsername && msg.issuedPassword && (
@@ -515,25 +685,63 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Reply Composer */}
+                {/* Reply Composer + Photo Upload */}
                 <form
-                  onSubmit={handleSendFollowUp}
+                  onSubmit={handleSendMessage}
                   className="p-3 bg-[#080f14] border-t border-white/[0.08] space-y-2"
                 >
                   {errorMsg && (
                     <div className="text-[11px] text-rose-400 px-1">{errorMsg}</div>
                   )}
+
+                  {pendingPhoto && (
+                    <div className="flex items-center gap-3 p-2 rounded-xl bg-[#060b0e] border border-[#14e071]/35">
+                      <img
+                        src={pendingPhoto}
+                        alt="Photo preview"
+                        className="w-11 h-11 rounded-lg object-cover border border-white/10"
+                      />
+                      <span className="flex-1 text-[11px] text-slate-300 truncate">
+                        Photo attached · Add a caption or press Send
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPendingPhoto(null)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-white/[0.06] cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isSending || isProcessingPhoto}
+                      title="Send Photo"
+                      className="p-2.5 rounded-xl bg-[#060b0e] hover:bg-[#101c24] border border-white/[0.1] hover:border-[#14e071]/40 text-[#14e071] transition shrink-0 cursor-pointer disabled:opacity-50"
+                    >
+                      <ImagePlus className="w-4 h-4" />
+                    </button>
                     <input
                       type="text"
                       value={replyText}
                       onChange={e => setReplyText(e.target.value)}
-                      placeholder="Write a message to Admin..."
+                      placeholder={
+                        isProcessingPhoto
+                          ? 'Preparing photo...'
+                          : 'Write a message or send a photo...'
+                      }
                       className="flex-1 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none transition"
                     />
                     <button
                       type="submit"
-                      disabled={isSending || !replyText.trim()}
+                      disabled={
+                        isSending ||
+                        isProcessingPhoto ||
+                        (!replyText.trim() && !pendingPhoto)
+                      }
                       className="px-4 py-2.5 rounded-xl apex-glow-btn disabled:opacity-50 font-bold text-xs flex items-center gap-1.5 shrink-0 cursor-pointer"
                     >
                       <Send className="w-3.5 h-3.5" />
@@ -544,6 +752,29 @@ export const NewIdChatModal: React.FC<NewIdChatModalProps> = ({
               </>
             )}
           </motion.div>
+
+          {/* Fullscreen Image Lightbox */}
+          {lightboxImage && (
+            <div
+              onClick={() => setLightboxImage(null)}
+              className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
+            >
+              <button
+                type="button"
+                onClick={() => setLightboxImage(null)}
+                aria-label="Close photo preview"
+                className="absolute top-4 right-4 p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <img
+                src={lightboxImage}
+                alt="Full size chat attachment"
+                onClick={e => e.stopPropagation()}
+                className="max-w-full max-h-[88vh] rounded-2xl object-contain border border-white/15 shadow-2xl"
+              />
+            </div>
+          )}
         </div>
       )}
     </AnimatePresence>

@@ -16,13 +16,16 @@ import {
   AlertTriangle,
   Lock,
   User as UserIcon,
-  LayoutDashboard
+  LayoutDashboard,
+  MessageSquareText
 } from 'lucide-react';
 
 interface HeaderProps {
   onOpenDeposit?: () => void;
   onOpenWithdraw?: () => void;
   onOpenProfile?: () => void;
+  onOpenChat?: () => void;
+  hasUnreadChat?: boolean;
   currentTab: string;
   setCurrentTab: (tab: string) => void;
 }
@@ -30,6 +33,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   onOpenDeposit,
   onOpenProfile,
+  onOpenChat,
+  hasUnreadChat,
   currentTab,
   setCurrentTab
 }) => {
@@ -230,6 +235,24 @@ export const Header: React.FC<HeaderProps> = ({
                     <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                     Deposit
                   </button>
+
+                  {/* Chat with Admin CTA (visible on mobile & desktop for logged-in users) */}
+                  {onOpenChat && (
+                    <button
+                      type="button"
+                      onClick={onOpenChat}
+                      title="Chat with Admin"
+                      className="relative flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-[#14e071]/35 text-[#14e071] font-bold text-xs whitespace-nowrap shrink-0 transition cursor-pointer"
+                    >
+                      <MessageSquareText className="w-4 h-4" />
+                      <span className="hidden md:inline">Chat Admin</span>
+                      {hasUnreadChat && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-[#14e071] text-[#04130b] text-[9px] font-black uppercase">
+                          New
+                        </span>
+                      )}
+                    </button>
+                  )}
 
                   {/* User Profile Dropdown */}
                   <div className="relative">

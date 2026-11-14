@@ -26,6 +26,7 @@ import {
   fsUpdateWhatsAppSupport,
   fsAdminSendIdChatReply,
   fsAdminUpdateIdChatStatus,
+  fsAdminDeleteIdChat,
   fsMarkIdChatRead,
   logoutFirebase,
   seedInitialFirestoreIfNeeded,
@@ -149,11 +150,13 @@ interface AppContextType {
   sendAdminIdChatReply: (params: {
     chatId: string;
     text: string;
+    imageUrl?: string;
     issuedUsername?: string;
     issuedPassword?: string;
     nextStatus?: IdChatStatus;
   }) => Promise<ActionResult>;
   updateIdChatStatus: (chatId: string, status: IdChatStatus) => Promise<ActionResult>;
+  deleteIdChat: (chatId: string) => Promise<ActionResult>;
   markIdChatRead: (chatId: string, role: 'user' | 'admin') => Promise<void>;
 }
 
@@ -658,6 +661,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const sendAdminIdChatReply = async (params: {
     chatId: string;
     text: string;
+    imageUrl?: string;
     issuedUsername?: string;
     issuedPassword?: string;
     nextStatus?: IdChatStatus;
@@ -667,6 +671,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         chatId: params.chatId,
         adminName: adminUser?.fullName || adminUser?.username || 'Admin',
         text: params.text,
+        imageUrl: params.imageUrl,
         issuedUsername: params.issuedUsername,
         issuedPassword: params.issuedPassword,
         nextStatus: params.nextStatus
@@ -681,6 +686,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return await fsAdminUpdateIdChatStatus(chatId, status);
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to update chat status' };
+    }
+  };
+
+  const deleteIdChat = async (chatId: string): Promise<ActionResult> => {
+    try {
+      return await fsAdminDeleteIdChat(chatId);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to delete chat' };
     }
   };
 
@@ -741,6 +754,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         idChats,
         sendAdminIdChatReply,
         updateIdChatStatus,
+        deleteIdChat,
         markIdChatRead
       }}
     >

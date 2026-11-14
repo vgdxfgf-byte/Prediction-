@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { subscribeIdChatMessages } from '../../services/firestoreService';
+import { compressChatImage } from '../../utils/imageCompression';
 import type { IdChatMessage, IdChatStatus } from '../../types';
 import {
   MessageSquareText,
@@ -14,22 +15,35 @@ import {
   Sparkles,
   Phone,
   ShieldCheck,
-  AlertTriangle
+  AlertTriangle,
+  ImagePlus,
+  X,
+  ZoomIn,
+  Trash2
 } from 'lucide-react';
 
 type ThreadFilter = 'all' | 'open' | 'issued' | 'closed';
 
 export const AdminIdChats: React.FC = () => {
-  const { idChats, createUser, sendAdminIdChatReply, updateIdChatStatus, markIdChatRead } =
-    useApp();
+  const {
+    idChats,
+    createUser,
+    sendAdminIdChatReply,
+    updateIdChatStatus,
+    deleteIdChat,
+    markIdChatRead
+  } = useApp();
 
   const [filter, setFilter] = useState<ThreadFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<IdChatMessage[]>([]);
 
-  // Reply input
+  // Reply input & photo upload
   const [replyText, setReplyText] = useState('');
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [sendingReply, setSendingReply] = useState(false);
 
   // Inline Create & Send New ID builder
@@ -41,8 +55,11 @@ export const AdminIdChats: React.FC = () => {
   const [creatingId, setCreatingId] = useState(false);
   const [builderError, setBuilderError] = useState('');
   const [builderSuccess, setBuilderSuccess] = useState('');
+  const [confirmDeleteChatId, setConfirmDeleteChatId] = useState<string | null>(null);
+  const [deletingChat, setDeletingChat] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const filteredChats = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -175,19 +192,39 @@ export const AdminIdChats: React.FC = () => {
     setTimeout(() => setBuilderSuccess(''), 4000);
   };
 
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBuilderError('');
+    setIsProcessingPhoto(true);
+    try {
+      const compressed = await compressChatImage(file);
+      setPendingPhoto(compressed);
+    } catch (err) {
+      setBuilderError(err instanceof Error ? err.message : 'Could not attach photo');
+    } finally {
+      setIsProcessingPhoto(false);
+    }
+  };
+
   const handleSendReply = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedChat || !replyText.trim() || sendingReply) return;
+    if (!selectedChat || (!replyText.trim() && !pendingPhoto) || sendingReply || isProcessingPhoto) return;
     setSendingReply(true);
     const msg = replyText.trim();
+    const photo = pendingPhoto || undefined;
     setReplyText('');
+    setPendingPhoto(null);
     const res = await sendAdminIdChatReply({
       chatId: selectedChat.id,
-      text: msg
+      text: msg,
+      imageUrl: photo
     });
     setSendingReply(false);
     if (!res.success) {
       setReplyText(msg);
+      if (photo) setPendingPhoto(photo);
       setBuilderError(res.error || 'Failed to send reply');
     }
   };
@@ -197,20 +234,48 @@ export const AdminIdChats: React.FC = () => {
     await updateIdChatStatus(selectedChat.id, status);
   };
 
+  const handleDeleteSelectedChat = async () => {
+    if (!selectedChat || deletingChat) return;
+    const targetId = selectedChat.id;
+    setDeletingChat(true);
+    setBuilderError('');
+    const res = await deleteIdChat(targetId);
+    setDeletingChat(false);
+    if (!res.success) {
+      setBuilderError(res.error || 'Failed to delete chat');
+      return;
+    }
+    setConfirmDeleteChatId(null);
+    setShowIdBuilder(false);
+    setMessages([]);
+    if (selectedChatId === targetId) {
+      const next = filteredChats.find(c => c.id !== targetId);
+      setSelectedChatId(next ? next.id : null);
+    }
+  };
+
   const unreadCount = idChats.filter(c => c.unreadByAdmin).length;
   const openCount = idChats.filter(c => c.status === 'open').length;
 
   return (
     <div className="space-y-5">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handlePhotoSelect}
+        className="hidden"
+      />
+
       {/* Header */}
       <div className="apex-card rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-black text-white flex items-center gap-2">
             <MessageSquareText className="w-5 h-5 text-[#14e071]" />
-            New ID Request Chats
+            Player &amp; New ID Live Chats
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Chat live with visitors requesting a new User ID and create & send credentials instantly.
+            Chat in real time with logged-in players and visitors, exchange photos, and issue new User IDs instantly.
           </p>
         </div>
 
@@ -271,6 +336,7 @@ export const AdminIdChats: React.FC = () => {
                     onClick={() => {
                       setSelectedChatId(chat.id);
                       setShowIdBuilder(false);
+                      setConfirmDeleteChatId(null);
                       setBuilderError('');
                     }}
                     className={`w-full text-left p-3 rounded-xl border transition cursor-pointer space-y-1.5 ${
@@ -302,16 +368,18 @@ export const AdminIdChats: React.FC = () => {
                     </div>
 
                     <p className="text-[11px] text-slate-400 line-clamp-1">
-                      {chat.lastMessage || 'No messages yet'}
+                      {chat.lastMessage === '[Photo]' ? 'Photo attachment' : chat.lastMessage || 'No messages yet'}
                     </p>
 
                     <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono-numbers">
                       <span className="truncate">
-                        {chat.issuedUsername
-                          ? `Issued: @${chat.issuedUsername}`
-                          : chat.requestedUsername
-                            ? `Wants: @${chat.requestedUsername}`
-                            : 'New ID Inquiry'}
+                        {chat.username
+                          ? `Player: @${chat.username}`
+                          : chat.issuedUsername
+                            ? `Issued: @${chat.issuedUsername}`
+                            : chat.requestedUsername
+                              ? `Wants: @${chat.requestedUsername}`
+                              : 'New ID Inquiry'}
                       </span>
                       <span>
                         {new Date(chat.updatedAt).toLocaleTimeString([], {
@@ -346,6 +414,11 @@ export const AdminIdChats: React.FC = () => {
                     <h3 className="font-black text-sm text-white truncate">
                       {selectedChat.visitorName}
                     </h3>
+                    {selectedChat.username && (
+                      <span className="px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-400/30 text-sky-300 text-[10px] font-bold">
+                        @{selectedChat.username}
+                      </span>
+                    )}
                     {selectedChat.requestedUsername && (
                       <span className="text-[11px] text-slate-400">
                         · Desired: <strong className="text-white">@{selectedChat.requestedUsername}</strong>
@@ -367,7 +440,7 @@ export const AdminIdChats: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={handleOpenIdBuilder}
@@ -396,6 +469,37 @@ export const AdminIdChats: React.FC = () => {
                       Reopen
                     </button>
                   )}
+
+                  {confirmDeleteChatId === selectedChat.id ? (
+                    <div className="flex items-center gap-1.5 bg-rose-500/15 border border-rose-500/35 rounded-xl px-2 py-1">
+                      <button
+                        type="button"
+                        disabled={deletingChat}
+                        onClick={handleDeleteSelectedChat}
+                        className="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-white text-[11px] font-bold whitespace-nowrap cursor-pointer disabled:opacity-60"
+                      >
+                        {deletingChat ? 'Deleting...' : 'Confirm Delete'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deletingChat}
+                        onClick={() => setConfirmDeleteChatId(null)}
+                        className="px-2 py-1 rounded-lg text-slate-300 hover:text-white text-[11px] font-semibold cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteChatId(selectedChat.id)}
+                      title="Delete entire chat"
+                      className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-xs font-semibold flex items-center gap-1 whitespace-nowrap shrink-0 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -404,6 +508,13 @@ export const AdminIdChats: React.FC = () => {
                 <div className="mx-4 mt-3 p-2.5 rounded-xl bg-emerald-500/15 border border-[#14e071]/40 text-[#14e071] text-xs font-semibold flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
                   <span>{builderSuccess}</span>
+                </div>
+              )}
+
+              {!showIdBuilder && builderError && (
+                <div className="mx-4 mt-3 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{builderError}</span>
                 </div>
               )}
 
@@ -507,6 +618,7 @@ export const AdminIdChats: React.FC = () => {
               <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#060b0e]">
                 {messages.map(msg => {
                   const isAdminMsg = msg.senderRole === 'admin';
+                  const showBodyText = msg.text && !(msg.imageUrl && msg.text === '[Photo]');
                   return (
                     <div
                       key={msg.id}
@@ -536,9 +648,28 @@ export const AdminIdChats: React.FC = () => {
                           </span>
                         </div>
 
-                        <p className="leading-relaxed whitespace-pre-wrap break-words">
-                          {msg.text}
-                        </p>
+                        {msg.imageUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setLightboxImage(msg.imageUrl!)}
+                            className="relative group block rounded-xl overflow-hidden border border-white/10 cursor-pointer"
+                          >
+                            <img
+                              src={msg.imageUrl}
+                              alt="Chat attachment"
+                              className="max-h-60 w-auto rounded-xl object-contain bg-black/40"
+                            />
+                            <span className="absolute bottom-1.5 right-1.5 p-1 rounded-md bg-black/70 text-white opacity-80 group-hover:opacity-100 transition">
+                              <ZoomIn className="w-3.5 h-3.5" />
+                            </span>
+                          </button>
+                        )}
+
+                        {showBodyText && (
+                          <p className="leading-relaxed whitespace-pre-wrap break-words">
+                            {msg.text}
+                          </p>
+                        )}
 
                         {msg.issuedUsername && msg.issuedPassword && (
                           <div className="p-2.5 rounded-xl bg-[#060b0e] border border-[#14e071]/35 font-mono-numbers text-[11px] space-y-1">
@@ -558,31 +689,93 @@ export const AdminIdChats: React.FC = () => {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Admin Reply Composer */}
+              {/* Admin Reply Composer + Photo Upload */}
               <form
                 onSubmit={handleSendReply}
-                className="p-3 bg-[#070c10] border-t border-white/[0.08] flex items-center gap-2"
+                className="p-3 bg-[#070c10] border-t border-white/[0.08] space-y-2"
               >
-                <input
-                  type="text"
-                  value={replyText}
-                  onChange={e => setReplyText(e.target.value)}
-                  placeholder="Type a live reply to this user..."
-                  className="flex-1 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={sendingReply || !replyText.trim()}
-                  className="px-4 py-2.5 rounded-xl apex-glow-btn disabled:opacity-50 font-bold text-xs flex items-center gap-1.5 shrink-0 cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{sendingReply ? 'Sending...' : 'Reply'}</span>
-                </button>
+                {pendingPhoto && (
+                  <div className="flex items-center gap-3 p-2 rounded-xl bg-[#060b0e] border border-[#14e071]/35">
+                    <img
+                      src={pendingPhoto}
+                      alt="Photo preview"
+                      className="w-11 h-11 rounded-lg object-cover border border-white/10"
+                    />
+                    <span className="flex-1 text-[11px] text-slate-300 truncate">
+                      Photo attached · Add a caption or press Reply
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPendingPhoto(null)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-white/[0.06] cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={sendingReply || isProcessingPhoto}
+                    title="Send Photo"
+                    className="p-2.5 rounded-xl bg-[#060b0e] hover:bg-[#101c24] border border-white/[0.1] hover:border-[#14e071]/40 text-[#14e071] transition shrink-0 cursor-pointer disabled:opacity-50"
+                  >
+                    <ImagePlus className="w-4 h-4" />
+                  </button>
+                  <input
+                    type="text"
+                    value={replyText}
+                    onChange={e => setReplyText(e.target.value)}
+                    placeholder={
+                      isProcessingPhoto
+                        ? 'Preparing photo...'
+                        : 'Type a live reply or attach a photo...'
+                    }
+                    className="flex-1 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={
+                      sendingReply ||
+                      isProcessingPhoto ||
+                      (!replyText.trim() && !pendingPhoto)
+                    }
+                    className="px-4 py-2.5 rounded-xl apex-glow-btn disabled:opacity-50 font-bold text-xs flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{sendingReply ? 'Sending...' : 'Reply'}</span>
+                  </button>
+                </div>
               </form>
             </>
           )}
         </div>
       </div>
+
+      {/* Fullscreen Image Lightbox */}
+      {lightboxImage && (
+        <div
+          onClick={() => setLightboxImage(null)}
+          className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
+        >
+          <button
+            type="button"
+            onClick={() => setLightboxImage(null)}
+            aria-label="Close photo preview"
+            className="absolute top-4 right-4 p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <img
+            src={lightboxImage}
+            alt="Full size chat attachment"
+            onClick={e => e.stopPropagation()}
+            className="max-w-full max-h-[88vh] rounded-2xl object-contain border border-white/15 shadow-2xl"
+          />
+        </div>
+      )}
     </div>
   );
 };

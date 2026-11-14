@@ -176,6 +176,8 @@ export type IdChatStatus = 'open' | 'issued' | 'closed';
 
 export interface IdChatThread {
   id: string;
+  userId?: string;
+  username?: string;
   visitorName: string;
   contactInfo?: string;
   requestedUsername?: string;
@@ -194,6 +196,7 @@ export interface IdChatMessage {
   senderRole: 'user' | 'admin';
   senderName: string;
   text: string;
+  imageUrl?: string;
   issuedUsername?: string;
   issuedPassword?: string;
   createdAt: string;

@@ -36,6 +36,7 @@ interface UserDashboardProps {
   onOpenWithdraw: () => void;
   onOpenProfile: () => void;
   onOpenIdChat?: () => void;
+  hasUnreadChat?: boolean;
 }
 
 type SpotlightFilter = 'All' | 'Cricket' | 'Movies';
@@ -46,7 +47,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   onOpenDeposit,
   onOpenWithdraw,
   onOpenProfile,
-  onOpenIdChat
+  onOpenIdChat,
+  hasUnreadChat
 }) => {
   const { currentUser, bets, transactions, predictions, withdrawals } = useApp();
   const [marketFilter, setMarketFilter] = useState<SpotlightFilter>('All');
@@ -286,7 +288,12 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                   className="px-3.5 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-[#14e071] border border-[#14e071]/35 font-semibold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
                 >
                   <MessageSquarePlus className="w-4 h-4" />
-                  Chat Admin / New ID
+                  <span>Chat Admin</span>
+                  {hasUnreadChat && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-[#14e071] text-[#04130b] text-[9px] font-black uppercase">
+                      New
+                    </span>
+                  )}
                 </motion.button>
               )}
             </div>

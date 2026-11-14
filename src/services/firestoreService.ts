@@ -201,6 +201,8 @@ function mapCoinLogDoc(id: string, data: Record<string, unknown>): CoinAdjustmen
 function mapIdChatDoc(id: string, data: Record<string, unknown>): IdChatThread {
   return {
     id: String(data.id || id),
+    userId: data.userId ? String(data.userId) : undefined,
+    username: data.username ? String(data.username) : undefined,
     visitorName: String(data.visitorName || 'Guest'),
     contactInfo: data.contactInfo ? String(data.contactInfo) : undefined,
     requestedUsername: data.requestedUsername ? String(data.requestedUsername) : undefined,
@@ -221,6 +223,7 @@ function mapIdChatMessageDoc(id: string, data: Record<string, unknown>): IdChatM
     senderRole: data.senderRole === 'admin' ? 'admin' : 'user',
     senderName: String(data.senderName || 'User'),
     text: String(data.text || ''),
+    imageUrl: data.imageUrl ? String(data.imageUrl) : undefined,
     issuedUsername: data.issuedUsername ? String(data.issuedUsername) : undefined,
     issuedPassword: data.issuedPassword ? String(data.issuedPassword) : undefined,
     createdAt: toIso(data.createdAt)
@@ -1587,18 +1590,25 @@ export function generateSecureChatId(): string {
   return token;
 }
 
+export function getUserSupportChatId(userId: string): string {
+  const base = `chat_user_${sanitizeId(userId)}`;
+  return base.length >= 24 ? base : `${base}_apxsupport`.slice(0, 128);
+}
+
 export function subscribeIdChatThread(
   chatId: string,
-  onThread: (thread: IdChatThread | null) => void
+  onThread: (thread: IdChatThread | null, meta?: { hasPendingWrites: boolean }) => void
 ): Unsubscribe {
   return onSnapshot(
     doc(db, 'id_chats', chatId),
     snap => {
       if (!snap.exists()) {
-        onThread(null);
+        onThread(null, { hasPendingWrites: snap.metadata.hasPendingWrites });
         return;
       }
-      onThread(mapIdChatDoc(snap.id, snap.data()));
+      onThread(mapIdChatDoc(snap.id, snap.data()), {
+        hasPendingWrites: snap.metadata.hasPendingWrites
+      });
     },
     error => handleFirestoreError(error, OperationType.GET, `id_chats/${chatId}`)
   );
@@ -1622,18 +1632,27 @@ export function subscribeIdChatMessages(
 
 export async function fsSendVisitorIdChatMessage(params: {
   chatId: string;
+  userId?: string;
+  username?: string;
   visitorName: string;
   contactInfo?: string;
   requestedUsername?: string;
   text: string;
+  imageUrl?: string;
 }): Promise<{ success: boolean; error?: string }> {
   const cleanChatId = sanitizeId(params.chatId);
   if (cleanChatId.length < 20) {
     return { success: false, error: 'Invalid chat session ID' };
   }
-  const trimmedText = params.text.trim().slice(0, 1000);
+  const cleanImageUrl =
+    params.imageUrl &&
+    /^data:image\/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(params.imageUrl) &&
+    params.imageUrl.length <= 500000
+      ? params.imageUrl
+      : undefined;
+  const trimmedText = params.text.trim().slice(0, 1000) || (cleanImageUrl ? '[Photo]' : '');
   if (!trimmedText) {
-    return { success: false, error: 'Message cannot be empty' };
+    return { success: false, error: 'Message or photo is required' };
   }
   const cleanName = params.visitorName.trim().slice(0, 80) || 'New Player';
   const threadRef = doc(db, 'id_chats', cleanChatId);
@@ -1647,7 +1666,7 @@ export async function fsSendVisitorIdChatMessage(params: {
 
   if (!existingSnap.exists()) {
     try {
-      await setDoc(threadRef, {
+      const threadPayload: Record<string, unknown> = {
         id: cleanChatId,
         visitorName: cleanName,
         contactInfo: (params.contactInfo || '').trim().slice(0, 80),
@@ -1658,7 +1677,14 @@ export async function fsSendVisitorIdChatMessage(params: {
         unreadByUser: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
-      });
+      };
+      if (params.userId) {
+        threadPayload.userId = sanitizeId(params.userId);
+      }
+      if (params.username) {
+        threadPayload.username = normalizeUsername(params.username).slice(0, 64);
+      }
+      await setDoc(threadRef, threadPayload);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `id_chats/${cleanChatId}`);
     }
@@ -1676,15 +1702,20 @@ export async function fsSendVisitorIdChatMessage(params: {
   }
 
   const msgId = `msg_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+  const msgPayload: Record<string, unknown> = {
+    id: msgId,
+    chatId: cleanChatId,
+    senderRole: 'user',
+    senderName: cleanName,
+    text: trimmedText,
+    createdAt: serverTimestamp()
+  };
+  if (cleanImageUrl) {
+    msgPayload.imageUrl = cleanImageUrl;
+  }
+
   try {
-    await setDoc(doc(db, 'id_chats', cleanChatId, 'messages', msgId), {
-      id: msgId,
-      chatId: cleanChatId,
-      senderRole: 'user',
-      senderName: cleanName,
-      text: trimmedText,
-      createdAt: serverTimestamp()
-    });
+    await setDoc(doc(db, 'id_chats', cleanChatId, 'messages', msgId), msgPayload);
     return { success: true };
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, `id_chats/${cleanChatId}/messages/${msgId}`);
@@ -1714,13 +1745,20 @@ export async function fsAdminSendIdChatReply(params: {
   chatId: string;
   adminName: string;
   text: string;
+  imageUrl?: string;
   issuedUsername?: string;
   issuedPassword?: string;
   nextStatus?: IdChatStatus;
 }): Promise<{ success: boolean; error?: string }> {
   const cleanChatId = sanitizeId(params.chatId);
-  const trimmedText = params.text.trim().slice(0, 1000);
-  if (!trimmedText) return { success: false, error: 'Message cannot be empty' };
+  const cleanImageUrl =
+    params.imageUrl &&
+    /^data:image\/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(params.imageUrl) &&
+    params.imageUrl.length <= 500000
+      ? params.imageUrl
+      : undefined;
+  const trimmedText = params.text.trim().slice(0, 1000) || (cleanImageUrl ? '[Photo]' : '');
+  if (!trimmedText) return { success: false, error: 'Message or photo is required' };
 
   const msgId = `msg_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
   const msgPayload: Record<string, unknown> = {
@@ -1731,6 +1769,9 @@ export async function fsAdminSendIdChatReply(params: {
     text: trimmedText,
     createdAt: serverTimestamp()
   };
+  if (cleanImageUrl) {
+    msgPayload.imageUrl = cleanImageUrl;
+  }
   if (params.issuedUsername) {
     msgPayload.issuedUsername = params.issuedUsername.trim().slice(0, 64);
   }
@@ -1779,6 +1820,38 @@ export async function fsAdminUpdateIdChatStatus(
     return { success: true };
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `id_chats/${chatId}`);
+  }
+}
+
+export async function fsAdminDeleteIdChat(
+  chatId: string
+): Promise<{ success: boolean; error?: string }> {
+  const cleanChatId = sanitizeId(chatId);
+  if (!cleanChatId) return { success: false, error: 'Invalid chat ID' };
+
+  try {
+    const msgsSnap = await getDocs(collection(db, 'id_chats', cleanChatId, 'messages'));
+    const docsToDelete = msgsSnap.docs;
+
+    for (let i = 0; i < docsToDelete.length; i += 400) {
+      const batch = writeBatch(db);
+      const chunk = docsToDelete.slice(i, i + 400);
+      chunk.forEach(d => batch.delete(d.ref));
+      if (i + 400 >= docsToDelete.length) {
+        batch.delete(doc(db, 'id_chats', cleanChatId));
+      }
+      await batch.commit();
+    }
+
+    if (docsToDelete.length === 0) {
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'id_chats', cleanChatId));
+      await batch.commit();
+    }
+
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `id_chats/${cleanChatId}`);
   }
 }
 

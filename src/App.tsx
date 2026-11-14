@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence, MotionConfig } from 'motion/react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/common/Header';
 import { BetSlipModal } from './components/common/BetSlipModal';
+import { getUserSupportChatId, subscribeIdChatThread } from './services/firestoreService';
 
 // User Portal Components
 import { UserLogin } from './components/user/UserLogin';
@@ -69,9 +70,22 @@ const MainAppContent: React.FC = () => {
   const [betModalPrediction, setBetModalPrediction] = useState<Prediction | null>(null);
   const [betModalChoice, setBetModalChoice] = useState<'YES' | 'NO'>('YES');
 
-  // User Profile / Change Password Modal & New ID Chat Modal
+  // User Profile / Change Password Modal & Live Admin Chat Modal
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [showUserIdChat, setShowUserIdChat] = useState<boolean>(false);
+  const [hasUnreadUserChat, setHasUnreadUserChat] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (activePortal !== 'user' || !currentUser?.id) {
+      setHasUnreadUserChat(false);
+      return;
+    }
+    const chatId = getUserSupportChatId(currentUser.id);
+    const unsub = subscribeIdChatThread(chatId, thread => {
+      setHasUnreadUserChat(Boolean(thread?.unreadByUser));
+    });
+    return () => unsub();
+  }, [activePortal, currentUser?.id]);
 
   // Quick Action triggers for Wallet
   const [walletInitialModal, setWalletInitialModal] = useState<'deposit' | 'withdraw' | null>(null);
@@ -314,6 +328,8 @@ const MainAppContent: React.FC = () => {
         onOpenDeposit={handleOpenDeposit}
         onOpenWithdraw={handleOpenWithdraw}
         onOpenProfile={() => setShowProfileModal(true)}
+        onOpenChat={() => setShowUserIdChat(true)}
+        hasUnreadChat={hasUnreadUserChat}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8">
@@ -333,6 +349,7 @@ const MainAppContent: React.FC = () => {
                 onOpenWithdraw={handleOpenWithdraw}
                 onOpenProfile={() => setShowProfileModal(true)}
                 onOpenIdChat={() => setShowUserIdChat(true)}
+                hasUnreadChat={hasUnreadUserChat}
               />
             )}
 
@@ -433,11 +450,16 @@ const MainAppContent: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Logged-in User Admin Live Chat for New ID */}
+      {/* Logged-in User Live Support Chat with Admin */}
       <NewIdChatModal
         isOpen={showUserIdChat}
         onClose={() => setShowUserIdChat(false)}
         defaultVisitorName={currentUser.fullName}
+        loggedInUser={{
+          id: currentUser.id,
+          username: currentUser.username,
+          fullName: currentUser.fullName
+        }}
       />
 
       {/* Footer */}
