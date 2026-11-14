@@ -218,6 +218,37 @@ service cloud.firestore {
         data.createdAt is timestamp;
     }
 
+    function isValidIdChat(data) {
+      return data.keys().hasAll(['id', 'visitorName', 'status', 'lastMessage', 'unreadByAdmin', 'unreadByUser', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'visitorName', 'contactInfo', 'requestedUsername', 'status', 'lastMessage', 'unreadByAdmin', 'unreadByUser', 'issuedUsername', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.id.size() >= 20 &&
+        data.visitorName is string && data.visitorName.size() >= 1 && data.visitorName.size() <= 80 &&
+        isOptionalString(data, 'contactInfo', 80) &&
+        isOptionalString(data, 'requestedUsername', 64) &&
+        data.status in ['open', 'issued', 'closed'] &&
+        data.lastMessage is string && data.lastMessage.size() <= 500 &&
+        data.unreadByAdmin is bool &&
+        data.unreadByUser is bool &&
+        isOptionalString(data, 'issuedUsername', 64) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidIdChatMessage(data) {
+      return data.keys().hasAll(['id', 'chatId', 'senderRole', 'senderName', 'text', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'chatId', 'senderRole', 'senderName', 'text', 'issuedUsername', 'issuedPassword', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.chatId) &&
+        data.chatId.size() >= 20 &&
+        data.senderRole in ['user', 'admin'] &&
+        data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80 &&
+        data.text is string && data.text.size() >= 1 && data.text.size() <= 1000 &&
+        isOptionalString(data, 'issuedUsername', 64) &&
+        isOptionalString(data, 'issuedPassword', 64) &&
+        data.createdAt is timestamp;
+    }
+
     // --- Collection Rules ---
 
     match /test/connection {
@@ -375,6 +406,48 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isAdmin() && isValidId(logId) && isValidCoinLog(incoming()) && incoming().createdAt == request.time;
       allow update, delete: if isAdmin() && isValidId(logId);
+    }
+
+    match /id_chats/{chatId} {
+      allow get: if isValidId(chatId) && (isAdmin() || chatId.size() >= 20);
+      allow list: if isAdmin();
+      allow create: if isValidId(chatId) && chatId.size() >= 20 && isValidIdChat(incoming()) &&
+        incoming().id == chatId &&
+        incoming().status == 'open' &&
+        incoming().unreadByUser == false &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(chatId) && isValidIdChat(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (chatId.size() >= 20 &&
+            incoming().status == existing().status &&
+            incoming().visitorName == existing().visitorName &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'unreadByAdmin', 'unreadByUser', 'updatedAt']))
+        );
+      allow delete: if isAdmin() && isValidId(chatId);
+
+      match /messages/{msgId} {
+        allow get: if isValidId(chatId) && isValidId(msgId) && (
+          isAdmin() ||
+          (chatId.size() >= 20 && exists(/databases/$(database)/documents/id_chats/$(chatId)))
+        );
+        allow list: if isValidId(chatId) && (
+          isAdmin() ||
+          (chatId.size() >= 20 && exists(/databases/$(database)/documents/id_chats/$(chatId)))
+        );
+        allow create: if isValidId(chatId) && isValidId(msgId) && isValidIdChatMessage(incoming()) &&
+          incoming().id == msgId &&
+          incoming().chatId == chatId &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/id_chats/$(chatId)) && (
+            (isAdmin() && incoming().senderRole == 'admin') ||
+            (chatId.size() >= 20 && incoming().senderRole == 'user')
+          );
+        allow update, delete: if isAdmin() && isValidId(chatId) && isValidId(msgId);
+      }
     }
   }
 }

@@ -24,6 +24,9 @@ import {
   fsUpdateUser,
   fsUpdateUserPaymentGateway,
   fsUpdateWhatsAppSupport,
+  fsAdminSendIdChatReply,
+  fsAdminUpdateIdChatStatus,
+  fsMarkIdChatRead,
   logoutFirebase,
   seedInitialFirestoreIfNeeded,
   signInAdminWithGoogle,
@@ -43,7 +46,9 @@ import {
   PlatformStats,
   PredictionStatus,
   PaymentGatewayConfig,
-  WhatsAppSupportConfig
+  WhatsAppSupportConfig,
+  IdChatThread,
+  IdChatStatus
 } from '../types';
 
 const DEFAULT_PAYMENT_GATEWAY: PaymentGatewayConfig = {
@@ -138,6 +143,18 @@ interface AppContextType {
   getEffectivePaymentGateway: (userId?: string) => PaymentGatewayConfig;
   whatsappSupport: WhatsAppSupportConfig;
   updateWhatsAppSupport: (config: Omit<WhatsAppSupportConfig, 'updatedAt'>) => Promise<ActionResult>;
+
+  // Admin Actions - New ID Live Chats
+  idChats: IdChatThread[];
+  sendAdminIdChatReply: (params: {
+    chatId: string;
+    text: string;
+    issuedUsername?: string;
+    issuedPassword?: string;
+    nextStatus?: IdChatStatus;
+  }) => Promise<ActionResult>;
+  updateIdChatStatus: (chatId: string, status: IdChatStatus) => Promise<ActionResult>;
+  markIdChatRead: (chatId: string, role: 'user' | 'admin') => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -200,6 +217,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [deposits, setDeposits] = useState<DepositRequest[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [coinLogs, setCoinLogs] = useState<CoinAdjustmentLog[]>([]);
+  const [idChats, setIdChats] = useState<IdChatThread[]>([]);
   const [paymentGateway, setPaymentGateway] = useState<PaymentGatewayConfig>(DEFAULT_PAYMENT_GATEWAY);
   const [whatsappSupport, setWhatsappSupport] = useState<WhatsAppSupportConfig>(DEFAULT_WHATSAPP_SUPPORT);
 
@@ -231,6 +249,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setDeposits([]);
         setWithdrawals([]);
         setCoinLogs([]);
+        setIdChats([]);
       }
       setIsHydrating(false);
     });
@@ -279,6 +298,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           onDeposits: d => setDeposits(d),
           onWithdrawals: w => setWithdrawals(w),
           onCoinLogs: l => setCoinLogs(l),
+          onIdChats: c => setIdChats(c),
           onPaymentGateway: cfg =>
             setPaymentGateway(prev => (JSON.stringify(prev) === JSON.stringify(cfg) ? prev : cfg))
         });
@@ -635,6 +655,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const sendAdminIdChatReply = async (params: {
+    chatId: string;
+    text: string;
+    issuedUsername?: string;
+    issuedPassword?: string;
+    nextStatus?: IdChatStatus;
+  }): Promise<ActionResult> => {
+    try {
+      return await fsAdminSendIdChatReply({
+        chatId: params.chatId,
+        adminName: adminUser?.fullName || adminUser?.username || 'Admin',
+        text: params.text,
+        issuedUsername: params.issuedUsername,
+        issuedPassword: params.issuedPassword,
+        nextStatus: params.nextStatus
+      });
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to send reply' };
+    }
+  };
+
+  const updateIdChatStatus = async (chatId: string, status: IdChatStatus): Promise<ActionResult> => {
+    try {
+      return await fsAdminUpdateIdChatStatus(chatId, status);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to update chat status' };
+    }
+  };
+
+  const markIdChatRead = async (chatId: string, role: 'user' | 'admin'): Promise<void> => {
+    await fsMarkIdChatRead(chatId, role);
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -684,7 +737,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateUserPaymentGateway,
         getEffectivePaymentGateway,
         whatsappSupport,
-        updateWhatsAppSupport
+        updateWhatsAppSupport,
+        idChats,
+        sendAdminIdChatReply,
+        updateIdChatStatus,
+        markIdChatRead
       }}
     >
       {children}

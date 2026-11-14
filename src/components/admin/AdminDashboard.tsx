@@ -20,7 +20,8 @@ import {
   Landmark,
   Crown,
   UserPlus,
-  ChevronRight
+  ChevronRight,
+  MessageSquareText
 } from 'lucide-react';
 import { PaymentGatewayEditor } from './PaymentGatewayEditor';
 
@@ -47,7 +48,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     paymentGateway,
     updateGlobalPaymentGateway,
     whatsappSupport,
-    updateWhatsAppSupport
+    updateWhatsAppSupport,
+    idChats
   } = useApp();
 
   const [chartWindow, setChartWindow] = useState<7 | 14>(7);
@@ -100,6 +102,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const totalDepositsVolume = deposits.reduce((sum, d) => sum + d.amount, 0);
   const totalWithdrawalsVolume = withdrawals.reduce((sum, w) => sum + w.amount, 0);
+  const openIdChats = idChats.filter(c => c.status === 'open');
+  const unreadIdChatsCount = idChats.filter(c => c.unreadByAdmin).length;
 
   // Build real Platform Overview time-series from exchange events
   const chartData = useMemo(() => {
@@ -270,6 +274,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <Plus className="w-4 h-4 text-[#14e071]" />
             New Prediction
+          </motion.button>
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={() => onNavigateTab('id_chats')}
+            className="px-4 py-2.5 rounded-xl bg-[#111c24] hover:bg-[#172631] text-white font-bold text-xs border border-[#14e071]/35 flex items-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
+          >
+            <MessageSquareText className="w-4 h-4 text-[#14e071]" />
+            <span>ID Chats</span>
+            {unreadIdChatsCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-[#14e071] text-[#04130b] text-[10px] font-black font-mono-numbers">
+                {unreadIdChatsCount}
+              </span>
+            )}
           </motion.button>
         </div>
       </motion.div>
@@ -671,10 +688,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               ))}
 
+            {openIdChats.slice(0, 2).map(chat => (
+              <div
+                key={chat.id}
+                className="p-3 rounded-xl bg-[#070c10] border border-[#14e071]/25 flex items-center justify-between text-xs gap-2"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-[#14e071]">
+                      New ID Chat: {chat.visitorName}
+                    </span>
+                    {chat.unreadByAdmin && (
+                      <span className="text-[10px] font-black text-amber-300">Unread</span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-400 truncate">{chat.lastMessage}</div>
+                </div>
+                <button
+                  onClick={() => onNavigateTab('id_chats')}
+                  className="px-3 py-1.5 rounded-lg bg-[#14e071]/15 text-[#14e071] hover:bg-[#14e071] hover:text-[#04130b] border border-[#14e071]/35 text-xs font-bold whitespace-nowrap shrink-0 transition cursor-pointer"
+                >
+                  Reply / Issue ID
+                </button>
+              </div>
+            ))}
+
             {deposits.filter(d => d.status === 'pending').length === 0 &&
-              withdrawals.filter(w => w.status === 'pending').length === 0 && (
+              withdrawals.filter(w => w.status === 'pending').length === 0 &&
+              openIdChats.length === 0 && (
                 <div className="py-8 text-center text-slate-400 text-xs">
-                  Action queue is clear. No pending financial requests.
+                  Action queue is clear. No pending financial requests or open ID chats.
                 </div>
               )}
           </div>

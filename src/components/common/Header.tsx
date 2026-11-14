@@ -41,7 +41,8 @@ export const Header: React.FC<HeaderProps> = ({
     logout,
     changeAdminCredentials,
     deposits,
-    withdrawals
+    withdrawals,
+    idChats
   } = useApp();
 
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -58,6 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   const pendingRequestsCount =
     deposits.filter(d => d.status === 'pending').length +
     withdrawals.filter(w => w.status === 'pending').length;
+  const unreadIdChatsCount = idChats.filter(c => c.unreadByAdmin).length;
 
   const handleOpenAdminSecurity = () => {
     setAdminNewUsername(adminUser?.username || 'admin');
@@ -349,6 +351,10 @@ export const Header: React.FC<HeaderProps> = ({
                 {
                   id: 'requests',
                   label: pendingRequestsCount > 0 ? `Requests (${pendingRequestsCount})` : 'Requests'
+                },
+                {
+                  id: 'id_chats',
+                  label: unreadIdChatsCount > 0 ? `ID Chat (${unreadIdChatsCount})` : 'ID Chat'
                 },
                 { id: 'gateway', label: 'Gateway' },
                 { id: 'audit', label: 'Audit' }

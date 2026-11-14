@@ -24,7 +24,8 @@ import {
   BarChart3,
   CheckCircle2,
   XCircle,
-  ChevronRight
+  ChevronRight,
+  MessageSquarePlus
 } from 'lucide-react';
 import { WhatsAppSupportButton } from '../common/WhatsAppSupportButton';
 
@@ -34,6 +35,7 @@ interface UserDashboardProps {
   onOpenDeposit: () => void;
   onOpenWithdraw: () => void;
   onOpenProfile: () => void;
+  onOpenIdChat?: () => void;
 }
 
 type SpotlightFilter = 'All' | 'Cricket' | 'Movies';
@@ -43,7 +45,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   onNavigateTab,
   onOpenDeposit,
   onOpenWithdraw,
-  onOpenProfile
+  onOpenProfile,
+  onOpenIdChat
 }) => {
   const { currentUser, bets, transactions, predictions, withdrawals } = useApp();
   const [marketFilter, setMarketFilter] = useState<SpotlightFilter>('All');
@@ -274,6 +277,18 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               </motion.button>
 
               <WhatsAppSupportButton username={currentUser.username} variant="dashboard" />
+
+              {onOpenIdChat && (
+                <motion.button
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.96 }}
+                  onClick={onOpenIdChat}
+                  className="px-3.5 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-[#14e071] border border-[#14e071]/35 font-semibold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 transition cursor-pointer"
+                >
+                  <MessageSquarePlus className="w-4 h-4" />
+                  Chat Admin / New ID
+                </motion.button>
+              )}
             </div>
           </div>
         </motion.div>

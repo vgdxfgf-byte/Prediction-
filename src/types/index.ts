@@ -171,3 +171,30 @@ export interface PlatformStats {
   pendingWithdrawalsCount: number;
   pendingWithdrawalsAmount: number;
 }
+
+export type IdChatStatus = 'open' | 'issued' | 'closed';
+
+export interface IdChatThread {
+  id: string;
+  visitorName: string;
+  contactInfo?: string;
+  requestedUsername?: string;
+  status: IdChatStatus;
+  lastMessage: string;
+  unreadByAdmin: boolean;
+  unreadByUser: boolean;
+  issuedUsername?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IdChatMessage {
+  id: string;
+  chatId: string;
+  senderRole: 'user' | 'admin';
+  senderName: string;
+  text: string;
+  issuedUsername?: string;
+  issuedPassword?: string;
+  createdAt: string;
+}

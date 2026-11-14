@@ -207,6 +207,41 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "userId", "username", "adminId", "adminUsername", "type", "amount", "previousBalance", "newBalance", "reason", "createdAt"]
+    },
+    "IdChatThread": {
+      "title": "IdChatThread",
+      "description": "Live support chat thread between a user/visitor and admin for issuing a new account ID.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 20, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "visitorName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "contactInfo": { "type": "string", "maxLength": 80 },
+        "requestedUsername": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["open", "issued", "closed"] },
+        "lastMessage": { "type": "string", "maxLength": 500 },
+        "unreadByAdmin": { "type": "boolean" },
+        "unreadByUser": { "type": "boolean" },
+        "issuedUsername": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "visitorName", "status", "lastMessage", "unreadByAdmin", "unreadByUser", "createdAt", "updatedAt"]
+    },
+    "IdChatMessage": {
+      "title": "IdChatMessage",
+      "description": "Single chat message inside a new-ID request thread.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "chatId": { "type": "string", "minLength": 20, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderRole": { "type": "string", "enum": ["user", "admin"] },
+        "senderName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "issuedUsername": { "type": "string", "maxLength": 64 },
+        "issuedPassword": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "chatId", "senderRole", "senderName", "text", "createdAt"]
     }
   },
   "firestore": {
@@ -253,6 +288,14 @@
     "/coinLogs/{logId}": {
       "schema": { "$ref": "#/entities/CoinAdjustmentLog" },
       "description": "Admin coin audit logs."
+    },
+    "/id_chats/{chatId}": {
+      "schema": { "$ref": "#/entities/IdChatThread" },
+      "description": "User/visitor chat threads requesting a new account ID."
+    },
+    "/id_chats/{chatId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/IdChatMessage" },
+      "description": "Real-time messages inside a new-ID request chat thread."
     }
   }
 }

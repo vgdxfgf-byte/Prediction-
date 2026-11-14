@@ -36,7 +36,10 @@ import type {
   CoinAdjustmentLog,
   PaymentGatewayConfig,
   WhatsAppSupportConfig,
-  PredictionStatus
+  PredictionStatus,
+  IdChatThread,
+  IdChatMessage,
+  IdChatStatus
 } from '../types';
 
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'vgdxfgf@gmail.com';
@@ -191,6 +194,35 @@ function mapCoinLogDoc(id: string, data: Record<string, unknown>): CoinAdjustmen
     previousBalance: Number(data.previousBalance ?? 0),
     newBalance: Number(data.newBalance ?? 0),
     reason: String(data.reason || ''),
+    createdAt: toIso(data.createdAt)
+  };
+}
+
+function mapIdChatDoc(id: string, data: Record<string, unknown>): IdChatThread {
+  return {
+    id: String(data.id || id),
+    visitorName: String(data.visitorName || 'Guest'),
+    contactInfo: data.contactInfo ? String(data.contactInfo) : undefined,
+    requestedUsername: data.requestedUsername ? String(data.requestedUsername) : undefined,
+    status: (data.status as IdChatStatus) || 'open',
+    lastMessage: String(data.lastMessage || ''),
+    unreadByAdmin: Boolean(data.unreadByAdmin),
+    unreadByUser: Boolean(data.unreadByUser),
+    issuedUsername: data.issuedUsername ? String(data.issuedUsername) : undefined,
+    createdAt: toIso(data.createdAt),
+    updatedAt: toIso(data.updatedAt)
+  };
+}
+
+function mapIdChatMessageDoc(id: string, data: Record<string, unknown>): IdChatMessage {
+  return {
+    id: String(data.id || id),
+    chatId: String(data.chatId || ''),
+    senderRole: data.senderRole === 'admin' ? 'admin' : 'user',
+    senderName: String(data.senderName || 'User'),
+    text: String(data.text || ''),
+    issuedUsername: data.issuedUsername ? String(data.issuedUsername) : undefined,
+    issuedPassword: data.issuedPassword ? String(data.issuedPassword) : undefined,
     createdAt: toIso(data.createdAt)
   };
 }
@@ -635,6 +667,7 @@ export function subscribeAdminPortalData(handlers: {
   onWithdrawals: (wdrs: WithdrawalRequest[]) => void;
   onCoinLogs: (logs: CoinAdjustmentLog[]) => void;
   onPaymentGateway: (cfg: PaymentGatewayConfig) => void;
+  onIdChats?: (chats: IdChatThread[]) => void;
 }): Unsubscribe {
   const unsubs: Unsubscribe[] = [];
 
@@ -709,6 +742,20 @@ export function subscribeAdminPortalData(handlers: {
       error => handleFirestoreError(error, OperationType.LIST, 'coinLogs')
     )
   );
+
+  if (handlers.onIdChats) {
+    unsubs.push(
+      onSnapshot(
+        collection(db, 'id_chats'),
+        snap => {
+          handlers.onIdChats?.(
+            snap.docs.map(d => mapIdChatDoc(d.id, d.data())).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+          );
+        },
+        error => handleFirestoreError(error, OperationType.LIST, 'id_chats')
+      )
+    );
+  }
 
   unsubs.push(
     onSnapshot(
@@ -1520,3 +1567,218 @@ export async function fsUpdateWhatsAppSupport(
     handleFirestoreError(err, OperationType.WRITE, 'settings/whatsappSupport');
   }
 }
+
+// --- New ID Live Chat Helpers ---
+
+export function generateSecureChatId(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const bytes = new Uint8Array(24);
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  let token = 'chat_';
+  for (let i = 0; i < bytes.length; i++) {
+    token += alphabet[bytes[i] % alphabet.length];
+  }
+  return token;
+}
+
+export function subscribeIdChatThread(
+  chatId: string,
+  onThread: (thread: IdChatThread | null) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, 'id_chats', chatId),
+    snap => {
+      if (!snap.exists()) {
+        onThread(null);
+        return;
+      }
+      onThread(mapIdChatDoc(snap.id, snap.data()));
+    },
+    error => handleFirestoreError(error, OperationType.GET, `id_chats/${chatId}`)
+  );
+}
+
+export function subscribeIdChatMessages(
+  chatId: string,
+  onMessages: (messages: IdChatMessage[]) => void
+): Unsubscribe {
+  return onSnapshot(
+    collection(db, 'id_chats', chatId, 'messages'),
+    snap => {
+      const list = snap.docs
+        .map(d => mapIdChatMessageDoc(d.id, d.data()))
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      onMessages(list);
+    },
+    error => handleFirestoreError(error, OperationType.LIST, `id_chats/${chatId}/messages`)
+  );
+}
+
+export async function fsSendVisitorIdChatMessage(params: {
+  chatId: string;
+  visitorName: string;
+  contactInfo?: string;
+  requestedUsername?: string;
+  text: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const cleanChatId = sanitizeId(params.chatId);
+  if (cleanChatId.length < 20) {
+    return { success: false, error: 'Invalid chat session ID' };
+  }
+  const trimmedText = params.text.trim().slice(0, 1000);
+  if (!trimmedText) {
+    return { success: false, error: 'Message cannot be empty' };
+  }
+  const cleanName = params.visitorName.trim().slice(0, 80) || 'New Player';
+  const threadRef = doc(db, 'id_chats', cleanChatId);
+
+  let existingSnap;
+  try {
+    existingSnap = await getDoc(threadRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, `id_chats/${cleanChatId}`);
+  }
+
+  if (!existingSnap.exists()) {
+    try {
+      await setDoc(threadRef, {
+        id: cleanChatId,
+        visitorName: cleanName,
+        contactInfo: (params.contactInfo || '').trim().slice(0, 80),
+        requestedUsername: (params.requestedUsername || '').trim().slice(0, 64),
+        status: 'open',
+        lastMessage: trimmedText.slice(0, 500),
+        unreadByAdmin: true,
+        unreadByUser: false,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `id_chats/${cleanChatId}`);
+    }
+  } else {
+    try {
+      await updateDoc(threadRef, {
+        lastMessage: trimmedText.slice(0, 500),
+        unreadByAdmin: true,
+        unreadByUser: false,
+        updatedAt: serverTimestamp()
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `id_chats/${cleanChatId}`);
+    }
+  }
+
+  const msgId = `msg_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+  try {
+    await setDoc(doc(db, 'id_chats', cleanChatId, 'messages', msgId), {
+      id: msgId,
+      chatId: cleanChatId,
+      senderRole: 'user',
+      senderName: cleanName,
+      text: trimmedText,
+      createdAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `id_chats/${cleanChatId}/messages/${msgId}`);
+  }
+}
+
+export async function fsMarkIdChatRead(
+  chatId: string,
+  role: 'user' | 'admin'
+): Promise<void> {
+  const cleanChatId = sanitizeId(chatId);
+  if (cleanChatId.length < 20) return;
+  try {
+    const threadRef = doc(db, 'id_chats', cleanChatId);
+    const snap = await getDoc(threadRef);
+    if (!snap.exists()) return;
+    await updateDoc(threadRef, {
+      ...(role === 'admin' ? { unreadByAdmin: false } : { unreadByUser: false }),
+      updatedAt: serverTimestamp()
+    });
+  } catch {
+    // Non-critical read receipt update
+  }
+}
+
+export async function fsAdminSendIdChatReply(params: {
+  chatId: string;
+  adminName: string;
+  text: string;
+  issuedUsername?: string;
+  issuedPassword?: string;
+  nextStatus?: IdChatStatus;
+}): Promise<{ success: boolean; error?: string }> {
+  const cleanChatId = sanitizeId(params.chatId);
+  const trimmedText = params.text.trim().slice(0, 1000);
+  if (!trimmedText) return { success: false, error: 'Message cannot be empty' };
+
+  const msgId = `msg_${Date.now()}_${Math.floor(1000 + Math.random() * 9000)}`;
+  const msgPayload: Record<string, unknown> = {
+    id: msgId,
+    chatId: cleanChatId,
+    senderRole: 'admin',
+    senderName: params.adminName.trim().slice(0, 80) || 'Admin',
+    text: trimmedText,
+    createdAt: serverTimestamp()
+  };
+  if (params.issuedUsername) {
+    msgPayload.issuedUsername = params.issuedUsername.trim().slice(0, 64);
+  }
+  if (params.issuedPassword) {
+    msgPayload.issuedPassword = params.issuedPassword.trim().slice(0, 64);
+  }
+
+  try {
+    await setDoc(doc(db, 'id_chats', cleanChatId, 'messages', msgId), msgPayload);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `id_chats/${cleanChatId}/messages/${msgId}`);
+  }
+
+  const threadUpdates: Record<string, unknown> = {
+    lastMessage: trimmedText.slice(0, 500),
+    unreadByAdmin: false,
+    unreadByUser: true,
+    updatedAt: serverTimestamp()
+  };
+  if (params.nextStatus) {
+    threadUpdates.status = params.nextStatus;
+  }
+  if (params.issuedUsername) {
+    threadUpdates.status = 'issued';
+    threadUpdates.issuedUsername = params.issuedUsername.trim().slice(0, 64);
+  }
+
+  try {
+    await updateDoc(doc(db, 'id_chats', cleanChatId), threadUpdates);
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `id_chats/${cleanChatId}`);
+  }
+}
+
+export async function fsAdminUpdateIdChatStatus(
+  chatId: string,
+  status: IdChatStatus
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    await updateDoc(doc(db, 'id_chats', sanitizeId(chatId)), {
+      status,
+      unreadByAdmin: false,
+      updatedAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `id_chats/${chatId}`);
+  }
+}
+

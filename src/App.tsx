@@ -16,6 +16,7 @@ import { PredictionsView } from './components/user/PredictionsView';
 import { PredictionHistoryView } from './components/user/PredictionHistoryView';
 import { WalletView } from './components/user/WalletView';
 import { ProfileView } from './components/user/ProfileView';
+import { NewIdChatModal } from './components/user/NewIdChatModal';
 
 // Admin Portal Components
 import { AdminLogin } from './components/admin/AdminLogin';
@@ -25,6 +26,7 @@ import { AdminCoinManagement } from './components/admin/AdminCoinManagement';
 import { AdminPredictions } from './components/admin/AdminPredictions';
 import { AdminRequests } from './components/admin/AdminRequests';
 import { AdminAuditLogs } from './components/admin/AdminAuditLogs';
+import { AdminIdChats } from './components/admin/AdminIdChats';
 
 import { Prediction } from './types';
 import {
@@ -42,7 +44,8 @@ import {
   Zap,
   Wallet,
   User as UserIcon,
-  Layers
+  Layers,
+  MessageSquareText
 } from 'lucide-react';
 
 const MainAppContent: React.FC = () => {
@@ -54,7 +57,8 @@ const MainAppContent: React.FC = () => {
     isHydrating,
     logout,
     deposits,
-    withdrawals
+    withdrawals,
+    idChats
   } = useApp();
 
   // Navigation State — default to User Dashboard so users land on the rich home UI immediately
@@ -65,8 +69,9 @@ const MainAppContent: React.FC = () => {
   const [betModalPrediction, setBetModalPrediction] = useState<Prediction | null>(null);
   const [betModalChoice, setBetModalChoice] = useState<'YES' | 'NO'>('YES');
 
-  // User Profile / Change Password Modal
+  // User Profile / Change Password Modal & New ID Chat Modal
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  const [showUserIdChat, setShowUserIdChat] = useState<boolean>(false);
 
   // Quick Action triggers for Wallet
   const [walletInitialModal, setWalletInitialModal] = useState<'deposit' | 'withdraw' | null>(null);
@@ -79,6 +84,7 @@ const MainAppContent: React.FC = () => {
   const pendingRequestsCount =
     deposits.filter(d => d.status === 'pending').length +
     withdrawals.filter(w => w.status === 'pending').length;
+  const unreadIdChatsCount = idChats.filter(c => c.unreadByAdmin).length;
 
   if (isHydrating) {
     return (
@@ -137,6 +143,12 @@ const MainAppContent: React.FC = () => {
         label: 'Requests',
         icon: ArrowDownUp,
         badge: pendingRequestsCount
+      },
+      {
+        id: 'id_chats',
+        label: 'ID Chat',
+        icon: MessageSquareText,
+        badge: unreadIdChatsCount
       },
       { id: 'gateway', label: 'Deposits & UPI', icon: Landmark },
       { id: 'audit', label: 'Audit Logs', icon: FileText }
@@ -249,6 +261,8 @@ const MainAppContent: React.FC = () => {
 
                 {adminTab === 'requests' && <AdminRequests key="requests" />}
 
+                {adminTab === 'id_chats' && <AdminIdChats />}
+
                 {adminTab === 'gateway' && <AdminRequests key="gateway" initialTab="gateway" />}
 
                 {adminTab === 'audit' && <AdminAuditLogs />}
@@ -318,6 +332,7 @@ const MainAppContent: React.FC = () => {
                 onOpenDeposit={handleOpenDeposit}
                 onOpenWithdraw={handleOpenWithdraw}
                 onOpenProfile={() => setShowProfileModal(true)}
+                onOpenIdChat={() => setShowUserIdChat(true)}
               />
             )}
 
@@ -417,6 +432,13 @@ const MainAppContent: React.FC = () => {
           <ProfileView onClose={() => setShowProfileModal(false)} />
         )}
       </AnimatePresence>
+
+      {/* Logged-in User Admin Live Chat for New ID */}
+      <NewIdChatModal
+        isOpen={showUserIdChat}
+        onClose={() => setShowUserIdChat(false)}
+        defaultVisitorName={currentUser.fullName}
+      />
 
       {/* Footer */}
       <footer className="hidden lg:block py-5 text-center text-xs text-slate-500 border-t border-white/[0.06] bg-[#060b0e]">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -8,9 +8,13 @@ import {
   TrendingUp,
   AlertCircle,
   ArrowRight,
-  Info
+  Info,
+  MessageSquarePlus
 } from 'lucide-react';
 import { WhatsAppSupportButton } from '../common/WhatsAppSupportButton';
+import { NewIdChatModal, loadStoredChatSession } from './NewIdChatModal';
+import { subscribeIdChatThread } from '../../services/firestoreService';
+import type { IdChatThread } from '../../types';
 
 interface UserLoginProps {
   onGoToAdmin: () => void;
@@ -23,6 +27,17 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showIdChat, setShowIdChat] = useState(false);
+  const [savedThread, setSavedThread] = useState<IdChatThread | null>(null);
+
+  useEffect(() => {
+    const existing = loadStoredChatSession();
+    if (!existing) return;
+    const unsub = subscribeIdChatThread(existing.chatId, thread => {
+      setSavedThread(thread);
+    });
+    return () => unsub();
+  }, [showIdChat]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,6 +142,22 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
             </motion.button>
           </form>
 
+          {/* Live Chat with Admin for New ID */}
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setShowIdChat(true)}
+            className="w-full py-2.5 px-4 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-[#14e071]/40 text-xs font-bold text-[#14e071] flex items-center justify-center gap-2 transition cursor-pointer"
+          >
+            <MessageSquarePlus className="w-4 h-4 shrink-0" />
+            <span>Don&apos;t have an ID? Chat with Admin</span>
+            {savedThread?.unreadByUser && (
+              <span className="px-2 py-0.5 rounded-full bg-[#14e071] text-[#04130b] text-[10px] font-black">
+                {savedThread.status === 'issued' ? 'ID Ready' : 'New Reply'}
+              </span>
+            )}
+          </motion.button>
+
           {/* Admin-Managed Registration Notice */}
           <div className="p-3 bg-[#060b0e] rounded-xl border border-white/[0.07] text-[11px] text-slate-400 space-y-1">
             <div className="flex items-center gap-1.5 text-slate-200 font-semibold">
@@ -134,7 +165,7 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
               <span>Admin-Managed Accounts</span>
             </div>
             <p className="text-slate-400 text-[10px] leading-relaxed">
-              User accounts are issued by the platform administrator. Sign in directly with your username and password — no email required.
+              User accounts are issued by the platform administrator. Chat directly above to get your new Username & Password, or sign in if you already have one.
             </p>
           </div>
 
@@ -152,6 +183,16 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
           </button>
         </div>
       </motion.div>
+
+      <NewIdChatModal
+        isOpen={showIdChat}
+        onClose={() => setShowIdChat(false)}
+        onApplyCredentials={(u, p) => {
+          setUsername(u);
+          setPassword(p);
+          setErrorMsg('');
+        }}
+      />
     </div>
   );
 };
