@@ -98,6 +98,7 @@ interface AppContextType {
   coinLogs: CoinAdjustmentLog[];
   stats: PlatformStats;
   nowMs: number;
+  portalDataError: string | null;
 
   // User Actions
   placeBet: (predictionId: string, choice: 'YES' | 'NO', amount: number) => Promise<ActionResult & { betId?: string }>;
@@ -232,6 +233,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [idChats, setIdChats] = useState<IdChatThread[]>([]);
   const [paymentGateway, setPaymentGateway] = useState<PaymentGatewayConfig>(DEFAULT_PAYMENT_GATEWAY);
   const [whatsappSupport, setWhatsappSupport] = useState<WhatsAppSupportConfig>(DEFAULT_WHATSAPP_SUPPORT);
+  const [portalDataError, setPortalDataError] = useState<string | null>(null);
 
   const setActivePortal = useCallback((portal: 'user' | 'admin') => {
     setActivePortalState(portal);
@@ -262,6 +264,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setWithdrawals([]);
         setCoinLogs([]);
         setIdChats([]);
+        setPortalDataError(null);
       }
       setIsHydrating(false);
     });
@@ -342,27 +345,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setPaymentGateway(prev => (JSON.stringify(prev) === JSON.stringify(cfg) ? prev : cfg))
         });
       } else {
-        let resolvedUserId = activeUserId;
-        if (!resolvedUserId) {
-          try {
-            const q = query(collection(db, 'users'), where('ownerUid', '==', fbAuthUser.uid), limit(1));
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-              resolvedUserId = snap.docs[0].id;
-              safeSetStorage(STORAGE_KEYS.USER_DOC_ID, resolvedUserId);
-              if (active) setActiveUserId(resolvedUserId);
+        setPortalDataError(null);
+        let resolvedUserId: string | null = null;
+        try {
+          const q = query(collection(db, 'users'), where('ownerUid', '==', fbAuthUser.uid), limit(1));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            resolvedUserId = snap.docs[0].id;
+            safeSetStorage(STORAGE_KEYS.USER_DOC_ID, resolvedUserId);
+            if (active && resolvedUserId !== activeUserId) {
+              setActiveUserId(resolvedUserId);
             }
-          } catch {
-            // No linked user yet; wait for explicit login
+          } else {
+            // Current Firebase auth user has no player profile (e.g. admin switching to User App)
+            safeRemoveStorage(STORAGE_KEYS.USER_DOC_ID);
+            if (active) {
+              setCurrentUser(null);
+              if (activeUserId !== null) setActiveUserId(null);
+            }
+            return;
           }
+        } catch {
+          resolvedUserId = activeUserId;
         }
         if (!active || !resolvedUserId) return;
 
         portalUnsub = subscribeUserPortalData(fbAuthUser.uid, resolvedUserId, {
           onUser: u => {
-            if (!u || u.status === 'suspended') {
+            if (!u || u.status === 'suspended' || (u.ownerUid && u.ownerUid !== fbAuthUser.uid)) {
               setCurrentUser(null);
-              if (!u) {
+              if (!u || (u.ownerUid && u.ownerUid !== fbAuthUser.uid)) {
                 safeRemoveStorage(STORAGE_KEYS.USER_DOC_ID);
                 setActiveUserId(null);
               }
@@ -375,7 +387,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           onDeposits: d => setDeposits(d),
           onWithdrawals: w => setWithdrawals(w),
           onPaymentGateway: cfg =>
-            setPaymentGateway(prev => (JSON.stringify(prev) === JSON.stringify(cfg) ? prev : cfg))
+            setPaymentGateway(prev => (JSON.stringify(prev) === JSON.stringify(cfg) ? prev : cfg)),
+          onError: msg => setPortalDataError(msg)
         });
       }
     })();
@@ -788,6 +801,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         coinLogs,
         stats,
         nowMs,
+        portalDataError,
 
         placeBet,
         requestDeposit,

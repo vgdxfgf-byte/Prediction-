@@ -579,9 +579,18 @@ export function subscribeUserPortalData(
     onDeposits: (deps: DepositRequest[]) => void;
     onWithdrawals: (wdrs: WithdrawalRequest[]) => void;
     onPaymentGateway: (cfg: PaymentGatewayConfig) => void;
+    onError?: (message: string) => void;
   }
 ): Unsubscribe {
   const unsubs: Unsubscribe[] = [];
+  const reportListenerError = (error: unknown, operationType: OperationType, path: string) => {
+    try {
+      handleFirestoreError(error, operationType, path);
+    } catch (wrapped) {
+      const msg = error instanceof Error ? error.message : String(wrapped);
+      handlers.onError?.(msg);
+    }
+  };
 
   unsubs.push(
     onSnapshot(
@@ -593,7 +602,7 @@ export function subscribeUserPortalData(
         }
         handlers.onUser(mapUserDoc(snap.id, snap.data()));
       },
-      error => handleFirestoreError(error, OperationType.GET, `users/${userId}`)
+      error => reportListenerError(error, OperationType.GET, `users/${userId}`)
     )
   );
 
@@ -605,7 +614,7 @@ export function subscribeUserPortalData(
           snap.docs.map(d => mapBetDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         );
       },
-      error => handleFirestoreError(error, OperationType.LIST, 'bets')
+      error => reportListenerError(error, OperationType.LIST, 'bets')
     )
   );
 
@@ -617,7 +626,7 @@ export function subscribeUserPortalData(
           snap.docs.map(d => mapTransactionDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         );
       },
-      error => handleFirestoreError(error, OperationType.LIST, 'transactions')
+      error => reportListenerError(error, OperationType.LIST, 'transactions')
     )
   );
 
@@ -629,7 +638,7 @@ export function subscribeUserPortalData(
           snap.docs.map(d => mapDepositDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         );
       },
-      error => handleFirestoreError(error, OperationType.LIST, 'deposits')
+      error => reportListenerError(error, OperationType.LIST, 'deposits')
     )
   );
 
@@ -641,7 +650,7 @@ export function subscribeUserPortalData(
           snap.docs.map(d => mapWithdrawalDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         );
       },
-      error => handleFirestoreError(error, OperationType.LIST, 'withdrawals')
+      error => reportListenerError(error, OperationType.LIST, 'withdrawals')
     )
   );
 
@@ -659,7 +668,7 @@ export function subscribeUserPortalData(
           });
         }
       },
-      error => handleFirestoreError(error, OperationType.GET, 'settings/paymentGateway')
+      error => reportListenerError(error, OperationType.GET, 'settings/paymentGateway')
     )
   );
 

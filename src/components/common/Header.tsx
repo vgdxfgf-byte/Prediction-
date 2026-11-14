@@ -17,12 +17,14 @@ import {
   Lock,
   User as UserIcon,
   LayoutDashboard,
-  MessageSquareText
+  MessageSquareText,
+  ArrowUpRight
 } from 'lucide-react';
 
 interface HeaderProps {
   onOpenDeposit?: () => void;
   onOpenWithdraw?: () => void;
+  onOpenWithdrawalHistory?: () => void;
   onOpenProfile?: () => void;
   onOpenChat?: () => void;
   hasUnreadChat?: boolean;
@@ -32,6 +34,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenDeposit,
+  onOpenWithdrawalHistory,
   onOpenProfile,
   onOpenChat,
   hasUnreadChat,
@@ -189,7 +192,7 @@ export const Header: React.FC<HeaderProps> = ({
                   { id: 'dashboard', label: 'Dashboard' },
                   { id: 'predictions', label: 'Markets' },
                   { id: 'history', label: 'Bet Results' },
-                  { id: 'wallet', label: 'Wallet & History' }
+                  { id: 'wallet', label: 'Wallet & Withdrawals' }
                 ].map(item => (
                   <button
                     key={item.id}
@@ -300,6 +303,20 @@ export const Header: React.FC<HeaderProps> = ({
                           >
                             <ArrowDownUp className="w-4 h-4 text-slate-400" />
                             Bet Results &amp; History
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (onOpenWithdrawalHistory) {
+                                onOpenWithdrawalHistory();
+                              } else {
+                                setCurrentTab('wallet');
+                              }
+                              setShowUserDropdown(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-2 cursor-pointer"
+                          >
+                            <ArrowUpRight className="w-4 h-4 text-purple-400" />
+                            Withdrawal History &amp; Proof
                           </button>
                           <button
                             onClick={() => {

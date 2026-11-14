@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import type { WithdrawalRequest } from '../../types';
 import { 
@@ -27,16 +27,40 @@ import {
 interface WalletViewProps {
   initialModal?: 'deposit' | 'withdraw' | null;
   onClearInitialModal?: () => void;
+  initialTab?: 'transactions' | 'deposits' | 'withdrawals' | null;
+  onClearInitialTab?: () => void;
 }
 
-export const WalletView: React.FC<WalletViewProps> = ({ initialModal, onClearInitialModal }) => {
+export const WalletView: React.FC<WalletViewProps> = ({
+  initialModal,
+  onClearInitialModal,
+  initialTab,
+  onClearInitialTab
+}) => {
   const { currentUser, transactions, deposits, withdrawals, requestDeposit, requestWithdrawal, getEffectivePaymentGateway } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'transactions' | 'deposits' | 'withdrawals'>('transactions');
+  const [activeTab, setActiveTab] = useState<'transactions' | 'deposits' | 'withdrawals'>(initialTab || 'transactions');
   const [txTypeFilter, setTxTypeFilter] = useState<'all' | 'wins' | 'bets' | 'deposits' | 'withdrawals' | 'admin'>('all');
   const [txSearch, setTxSearch] = useState<string>('');
   const [showDepositModal, setShowDepositModal] = useState<boolean>(initialModal === 'deposit');
   const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(initialModal === 'withdraw');
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+      onClearInitialTab?.();
+    }
+  }, [initialTab, onClearInitialTab]);
+
+  useEffect(() => {
+    if (initialModal === 'deposit') {
+      setShowDepositModal(true);
+      setShowWithdrawModal(false);
+    } else if (initialModal === 'withdraw') {
+      setShowWithdrawModal(true);
+      setShowDepositModal(false);
+    }
+  }, [initialModal]);
 
   // Deposit Form State
   const [depAmount, setDepAmount] = useState<number>(500);
@@ -74,9 +98,14 @@ export const WalletView: React.FC<WalletViewProps> = ({ initialModal, onClearIni
     }
     return true;
   });
-  const userDeposits = deposits.filter(d => d.userId === currentUser.id);
-  const userWithdrawals = withdrawals.filter(w => w.userId === currentUser.id);
+  const userDeposits = deposits.filter(
+    d => d.userId === currentUser.id || (d.ownerUid && currentUser.ownerUid && d.ownerUid === currentUser.ownerUid)
+  );
+  const userWithdrawals = withdrawals.filter(
+    w => w.userId === currentUser.id || (w.ownerUid && currentUser.ownerUid && w.ownerUid === currentUser.ownerUid)
+  );
   const withdrawalById = new Map(userWithdrawals.map(w => [w.id, w]));
+  const withdrawalsWithProofCount = userWithdrawals.filter(w => Boolean(w.proofImageUrl)).length;
   const effectiveGateway = getEffectivePaymentGateway(currentUser.id);
   const enabledGatewayChannels = effectiveGateway.channels.filter(c => c.enabled);
 
@@ -198,37 +227,48 @@ export const WalletView: React.FC<WalletViewProps> = ({ initialModal, onClearIni
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-        <div className="flex items-center gap-2">
+      <div className="border-b border-slate-800 pb-3">
+        <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-2">
           <button
+            type="button"
             onClick={() => setActiveTab('transactions')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition cursor-pointer ${
+            className={`px-2.5 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-semibold uppercase tracking-wider transition cursor-pointer text-center ${
               activeTab === 'transactions'
                 ? 'bg-[#14e071] text-[#04130b] font-bold shadow-[0_6px_18px_-6px_rgba(20,224,113,0.65)]'
                 : 'bg-[#0d151b] text-slate-400 hover:text-white border border-white/[0.08]'
             }`}
           >
-            Transaction History ({userTransactions.length})
+            <span className="sm:hidden">Txns ({userTransactions.length})</span>
+            <span className="hidden sm:inline">Transaction History ({userTransactions.length})</span>
           </button>
           <button
+            type="button"
             onClick={() => setActiveTab('deposits')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition ${
+            className={`px-2.5 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-semibold uppercase tracking-wider transition cursor-pointer text-center ${
               activeTab === 'deposits'
-                ? 'bg-emerald-600 text-white shadow-md'
+                ? 'bg-emerald-600 text-white shadow-md font-bold'
                 : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
             }`}
           >
-            Deposit Requests ({userDeposits.length})
+            <span className="sm:hidden">Deposits ({userDeposits.length})</span>
+            <span className="hidden sm:inline">Deposit Requests ({userDeposits.length})</span>
           </button>
           <button
+            type="button"
             onClick={() => setActiveTab('withdrawals')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition ${
+            className={`px-2.5 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-semibold uppercase tracking-wider transition cursor-pointer text-center flex items-center justify-center gap-1.5 ${
               activeTab === 'withdrawals'
-                ? 'bg-emerald-600 text-white shadow-md'
+                ? 'bg-purple-600 text-white shadow-md font-bold'
                 : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
             }`}
           >
-            Withdrawal Requests ({userWithdrawals.length})
+            <span className="sm:hidden">Withdraws ({userWithdrawals.length})</span>
+            <span className="hidden sm:inline">Withdrawal History ({userWithdrawals.length})</span>
+            {withdrawalsWithProofCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-[#14e071] text-[#04130b] text-[9px] font-black">
+                {withdrawalsWithProofCount}
+              </span>
+            )}
           </button>
         </div>
       </div>

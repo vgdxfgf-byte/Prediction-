@@ -46,7 +46,8 @@ import {
   LogOut,
   Home,
   Compass,
-  Zap,
+  Trophy,
+  AlertTriangle,
   Wallet,
   User as UserIcon,
   Layers,
@@ -63,7 +64,8 @@ const MainAppContent: React.FC = () => {
     logout,
     deposits,
     withdrawals,
-    idChats
+    idChats,
+    portalDataError
   } = useApp();
 
   // Navigation State — default to User Dashboard so users land on the rich home UI immediately
@@ -93,6 +95,7 @@ const MainAppContent: React.FC = () => {
 
   // Quick Action triggers for Wallet
   const [walletInitialModal, setWalletInitialModal] = useState<'deposit' | 'withdraw' | null>(null);
+  const [walletInitialTab, setWalletInitialTab] = useState<'transactions' | 'deposits' | 'withdrawals' | null>(null);
 
   // Quick Action triggers for Admin
   const [adminCreateUserOpen, setAdminCreateUserOpen] = useState<boolean>(false);
@@ -124,12 +127,20 @@ const MainAppContent: React.FC = () => {
 
   const handleOpenDeposit = () => {
     setUserTab('wallet');
+    setWalletInitialTab(null);
     setWalletInitialModal('deposit');
   };
 
   const handleOpenWithdraw = () => {
     setUserTab('wallet');
+    setWalletInitialTab('withdrawals');
     setWalletInitialModal('withdraw');
+  };
+
+  const handleOpenWalletTab = (tab: 'transactions' | 'deposits' | 'withdrawals') => {
+    setWalletInitialModal(null);
+    setWalletInitialTab(tab);
+    setUserTab('wallet');
   };
 
   const handleAdjustCoinsForUser = (userId: string) => {
@@ -348,12 +359,22 @@ const MainAppContent: React.FC = () => {
         setCurrentTab={setUserTab}
         onOpenDeposit={handleOpenDeposit}
         onOpenWithdraw={handleOpenWithdraw}
+        onOpenWithdrawalHistory={() => handleOpenWalletTab('withdrawals')}
         onOpenProfile={() => setShowProfileModal(true)}
         onOpenChat={() => setShowUserIdChat(true)}
         hasUnreadChat={hasUnreadUserChat}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8">
+        {portalDataError && (
+          <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/35 text-amber-200 text-xs flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              Some live ledger records could not sync right now ({portalDataError}). Try refreshing or signing in again.
+            </span>
+          </div>
+        )}
+
         <AnimatePresence mode="wait">
           <motion.div
             key={userTab}
@@ -366,6 +387,7 @@ const MainAppContent: React.FC = () => {
               <UserDashboard
                 onSelectPrediction={handleSelectPrediction}
                 onNavigateTab={setUserTab}
+                onOpenWalletTab={handleOpenWalletTab}
                 onOpenDeposit={handleOpenDeposit}
                 onOpenWithdraw={handleOpenWithdraw}
                 onOpenProfile={() => setShowProfileModal(true)}
@@ -378,28 +400,32 @@ const MainAppContent: React.FC = () => {
               <PredictionsView onSelectPrediction={handleSelectPrediction} />
             )}
 
-            {userTab === 'history' && <PredictionHistoryView />}
+            {userTab === 'history' && (
+              <PredictionHistoryView onGoToMarkets={() => setUserTab('predictions')} />
+            )}
 
             {userTab === 'wallet' && (
               <WalletView
                 initialModal={walletInitialModal}
                 onClearInitialModal={() => setWalletInitialModal(null)}
+                initialTab={walletInitialTab}
+                onClearInitialTab={() => setWalletInitialTab(null)}
               />
             )}
           </motion.div>
         </AnimatePresence>
       </main>
 
-      {/* Mobile Bottom Dock (Screen 1 inspired) */}
+      {/* Mobile Bottom Dock */}
       <nav
         aria-label="Mobile Navigation"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#080f14]/95 backdrop-blur-lg border-t border-white/[0.08] px-3 py-1.5"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#080f14]/95 backdrop-blur-lg border-t border-white/[0.08] px-2 py-1.5"
       >
-        <div className="max-w-md mx-auto flex items-center justify-around">
+        <div className="max-w-md mx-auto grid grid-cols-5 items-center">
           <button
             type="button"
             onClick={() => setUserTab('dashboard')}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[10px] font-semibold transition cursor-pointer ${
+            className={`flex flex-col items-center gap-0.5 py-1 rounded-xl text-[10px] font-semibold transition cursor-pointer ${
               userTab === 'dashboard' ? 'text-[#14e071]' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -410,7 +436,7 @@ const MainAppContent: React.FC = () => {
           <button
             type="button"
             onClick={() => setUserTab('predictions')}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[10px] font-semibold transition cursor-pointer ${
+            className={`flex flex-col items-center gap-0.5 py-1 rounded-xl text-[10px] font-semibold transition cursor-pointer ${
               userTab === 'predictions' ? 'text-[#14e071]' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -420,17 +446,19 @@ const MainAppContent: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setUserTab('predictions')}
-            aria-label="Quick Predict"
-            className="w-11 h-11 -mt-4 rounded-full apex-glow-btn flex items-center justify-center border-2 border-[#060b0e] transition cursor-pointer"
+            onClick={() => setUserTab('history')}
+            className={`flex flex-col items-center gap-0.5 py-1 rounded-xl text-[10px] font-semibold transition cursor-pointer ${
+              userTab === 'history' ? 'text-[#14e071]' : 'text-slate-400 hover:text-slate-200'
+            }`}
           >
-            <Zap className="w-5 h-5 fill-current" />
+            <Trophy className="w-4 h-4" />
+            <span>Bet Results</span>
           </button>
 
           <button
             type="button"
             onClick={() => setUserTab('wallet')}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[10px] font-semibold transition cursor-pointer ${
+            className={`flex flex-col items-center gap-0.5 py-1 rounded-xl text-[10px] font-semibold transition cursor-pointer ${
               userTab === 'wallet' ? 'text-[#14e071]' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -441,7 +469,7 @@ const MainAppContent: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowProfileModal(true)}
-            className="flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[10px] font-semibold text-slate-400 hover:text-[#14e071] transition cursor-pointer"
+            className="flex flex-col items-center gap-0.5 py-1 rounded-xl text-[10px] font-semibold text-slate-400 hover:text-[#14e071] transition cursor-pointer"
           >
             <UserIcon className="w-4 h-4" />
             <span>Profile</span>

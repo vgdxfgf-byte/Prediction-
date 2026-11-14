@@ -17,7 +17,11 @@ import {
 
 type HistoryFilter = 'all' | 'settled' | 'pending' | 'won' | 'lost' | 'voided';
 
-export const PredictionHistoryView: React.FC = () => {
+interface PredictionHistoryViewProps {
+  onGoToMarkets?: () => void;
+}
+
+export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ onGoToMarkets }) => {
   const { bets, predictions, currentUser } = useApp();
 
   const [activeTab, setActiveTab] = useState<HistoryFilter>('all');
@@ -30,7 +34,9 @@ export const PredictionHistoryView: React.FC = () => {
 
   if (!currentUser) return null;
 
-  const userBets = bets.filter(b => b.userId === currentUser.id);
+  const userBets = bets.filter(
+    b => b.userId === currentUser.id || (b.ownerUid && currentUser.ownerUid && b.ownerUid === currentUser.ownerUid)
+  );
   const settledBets = userBets.filter(b => b.result !== 'pending');
   const wonBets = userBets.filter(b => b.result === 'won');
   const lostBets = userBets.filter(b => b.result === 'lost');
@@ -178,12 +184,23 @@ export const PredictionHistoryView: React.FC = () => {
 
       {/* Bets List */}
       {filteredBets.length === 0 ? (
-        <div className="apex-card rounded-2xl p-12 text-center space-y-2">
+        <div className="apex-card rounded-2xl p-12 text-center space-y-3">
           <Clock className="w-10 h-10 text-slate-600 mx-auto" />
           <h3 className="font-bold text-slate-200 text-sm">No Bet Records Found</h3>
           <p className="text-xs text-slate-400">
-            No predictions found under the &ldquo;{activeTab}&rdquo; filter.
+            {userBets.length === 0
+              ? 'You have not placed any predictions yet. Place a YES/NO pick to see your slips and results here.'
+              : `No predictions found under the “${activeTab}” filter.`}
           </p>
+          {userBets.length === 0 && onGoToMarkets && (
+            <button
+              type="button"
+              onClick={onGoToMarkets}
+              className="px-4 py-2 rounded-xl apex-glow-btn text-xs font-bold transition cursor-pointer"
+            >
+              Browse Live Markets →
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">

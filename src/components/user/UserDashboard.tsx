@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useApp } from '../../context/AppContext';
-import { Prediction } from '../../types';
+import { Prediction, WithdrawalRequest } from '../../types';
 import cricketHeroImg from '../../assets/images/hero_cricket_stadium_1794598510096.jpg';
 import cinemaHeroImg from '../../assets/images/hero_cinema_premiere_1794598510861.jpg';
 import {
@@ -17,7 +17,6 @@ import {
   Flame,
   Plus,
   User as UserIcon,
-  KeyRound,
   Wallet,
   History,
   Film,
@@ -25,7 +24,11 @@ import {
   CheckCircle2,
   XCircle,
   ChevronRight,
-  MessageSquarePlus
+  MessageSquarePlus,
+  Image as ImageIcon,
+  ZoomIn,
+  Download,
+  X
 } from 'lucide-react';
 import { WhatsAppSupportButton } from '../common/WhatsAppSupportButton';
 import {
@@ -36,6 +39,7 @@ import {
 interface UserDashboardProps {
   onSelectPrediction: (pred: Prediction, choice: 'YES' | 'NO') => void;
   onNavigateTab: (tab: string) => void;
+  onOpenWalletTab: (tab: 'transactions' | 'deposits' | 'withdrawals') => void;
   onOpenDeposit: () => void;
   onOpenWithdraw: () => void;
   onOpenProfile: () => void;
@@ -48,6 +52,7 @@ type SpotlightFilter = 'All' | 'Cricket' | 'Movies';
 export const UserDashboard: React.FC<UserDashboardProps> = ({
   onSelectPrediction,
   onNavigateTab,
+  onOpenWalletTab,
   onOpenDeposit,
   onOpenWithdraw,
   onOpenProfile,
@@ -58,6 +63,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   const [marketFilter, setMarketFilter] = useState<SpotlightFilter>('All');
   const [heroSlide, setHeroSlide] = useState<'cricket' | 'movies'>('cricket');
   const [heroImgError, setHeroImgError] = useState<Record<string, boolean>>({});
+  const [viewingProofWithdrawal, setViewingProofWithdrawal] = useState<WithdrawalRequest | null>(null);
 
   const allOpenMarkets = predictions.filter(p => isMarketBettingOpen(p, nowMs));
 
@@ -87,7 +93,9 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   if (!currentUser) return null;
 
   // Compute metrics for current user
-  const userBets = bets.filter(b => b.userId === currentUser.id);
+  const userBets = bets.filter(
+    b => b.userId === currentUser.id || (b.ownerUid && currentUser.ownerUid && b.ownerUid === currentUser.ownerUid)
+  );
   const activeBets = userBets.filter(b => b.result === 'pending');
   const settledBets = userBets.filter(b => b.result !== 'pending');
   const wonBets = userBets.filter(b => b.result === 'won');
@@ -96,13 +104,18 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   const totalWinningCoins = wonBets.reduce((sum, b) => sum + b.actualWinnings, 0);
   const totalLosingCoins = lostBets.reduce((sum, b) => sum + b.amount, 0);
 
-  const userWithdrawals = withdrawals.filter(w => w.userId === currentUser.id);
+  const userWithdrawals = withdrawals.filter(
+    w => w.userId === currentUser.id || (w.ownerUid && currentUser.ownerUid && w.ownerUid === currentUser.ownerUid)
+  );
+  const withdrawalById = new Map(userWithdrawals.map(w => [w.id, w]));
   const pendingWithdrawals = userWithdrawals.filter(
     w => w.status === 'pending' || w.status === 'processing'
   );
   const pendingWithdrawalsAmount = pendingWithdrawals.reduce((sum, w) => sum + w.amount, 0);
+  const withdrawalsWithProof = userWithdrawals.filter(w => Boolean(w.proofImageUrl));
 
   const userTransactions = transactions.filter(t => t.userId === currentUser.id).slice(0, 5);
+  const totalUserTransactions = transactions.filter(t => t.userId === currentUser.id).length;
   const predictionById = new Map(predictions.map(p => [p.id, p]));
   const initials = currentUser.username.substring(0, 2).toUpperCase();
 
@@ -112,35 +125,43 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
       value: totalWinningCoins.toLocaleString(),
       sub: `${wonBets.length} won picks`,
       valueClass: 'text-[#14e071]',
-      icon: <Trophy className="w-4 h-4 text-[#14e071]" />
+      icon: <Trophy className="w-4 h-4 text-[#14e071]" />,
+      onClick: () => onNavigateTab('history')
     },
     {
       label: 'Total Losses',
       value: totalLosingCoins.toLocaleString(),
       sub: `${lostBets.length} settled`,
       valueClass: 'text-rose-400',
-      icon: <TrendingDown className="w-4 h-4 text-rose-400" />
+      icon: <TrendingDown className="w-4 h-4 text-rose-400" />,
+      onClick: () => onNavigateTab('history')
     },
     {
       label: 'Active Slips',
       value: activeBets.length.toLocaleString(),
       sub: 'Awaiting result',
       valueClass: 'text-sky-400',
-      icon: <Activity className="w-4 h-4 text-sky-400" />
+      icon: <Activity className="w-4 h-4 text-sky-400" />,
+      onClick: () => onNavigateTab('history')
     },
     {
       label: 'Total Predictions',
       value: userBets.length.toLocaleString(),
-      sub: 'Lifetime activity',
+      sub: 'Tap for Bet History',
       valueClass: 'text-white',
-      icon: <ShieldCheck className="w-4 h-4 text-slate-300" />
+      icon: <ShieldCheck className="w-4 h-4 text-slate-300" />,
+      onClick: () => onNavigateTab('history')
     },
     {
       label: 'Pending Payout',
       value: pendingWithdrawalsAmount.toLocaleString(),
-      sub: `${pendingWithdrawals.length} under review`,
+      sub:
+        withdrawalsWithProof.length > 0
+          ? `${withdrawalsWithProof.length} proof ready · View →`
+          : `${pendingWithdrawals.length} under review · View →`,
       valueClass: 'text-amber-400',
-      icon: <Clock className="w-4 h-4 text-amber-400" />
+      icon: <Clock className="w-4 h-4 text-amber-400" />,
+      onClick: () => onOpenWalletTab('withdrawals')
     }
   ];
 
@@ -155,27 +176,30 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     },
     {
       id: 'predictions',
-      label: 'Bet Results',
-      sub: `${settledBets.length} settled · ${activeBets.length} live`,
+      label: 'Bet History',
+      sub: `${settledBets.length} results · ${activeBets.length} live`,
       icon: Trophy,
       featured: false,
       onClick: () => onNavigateTab('history')
     },
     {
-      id: 'wallet',
-      label: 'Wallet & History',
-      sub: `${transactions.filter(t => t.userId === currentUser.id).length} txns`,
-      icon: Wallet,
+      id: 'withdrawals',
+      label: 'Withdrawals',
+      sub:
+        withdrawalsWithProof.length > 0
+          ? `${userWithdrawals.length} req · ${withdrawalsWithProof.length} proof`
+          : `${userWithdrawals.length} requests`,
+      icon: ArrowUpRight,
       featured: false,
-      onClick: () => onNavigateTab('wallet')
+      onClick: () => onOpenWalletTab('withdrawals')
     },
     {
-      id: 'profile',
-      label: 'Profile & Security',
-      sub: `@${currentUser.username}`,
-      icon: KeyRound,
+      id: 'wallet',
+      label: 'Transactions',
+      sub: `${totalUserTransactions} txns`,
+      icon: Wallet,
       featured: false,
-      onClick: onOpenProfile
+      onClick: () => onOpenWalletTab('transactions')
     }
   ];
 
@@ -434,12 +458,15 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
       {/* KPI Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {kpiCards.map((card, idx) => (
-          <motion.div
+          <motion.button
+            type="button"
             key={card.label}
+            onClick={card.onClick}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2, delay: Math.min(idx * 0.04, 0.2), ease: [0.16, 1, 0.3, 1] }}
-            className="apex-card rounded-xl p-4"
+            whileHover={{ y: -2 }}
+            className="apex-card hover:border-emerald-500/35 rounded-xl p-4 text-left transition cursor-pointer"
           >
             <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
               <span className="truncate">{card.label}</span>
@@ -451,7 +478,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               {card.value}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">{card.sub}</div>
-          </motion.div>
+          </motion.button>
         ))}
       </div>
 
@@ -778,6 +805,92 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             )}
           </motion.div>
 
+          {/* Withdrawal History & Admin Payout Proof */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.24, delay: 0.13 }}
+            className="apex-card rounded-2xl p-4 space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                <ArrowUpRight className="w-4 h-4 text-purple-400" />
+                Withdrawal History ({userWithdrawals.length})
+              </h3>
+              <button
+                type="button"
+                onClick={() => onOpenWalletTab('withdrawals')}
+                className="text-[11px] font-semibold text-[#14e071] hover:text-emerald-300 transition cursor-pointer"
+              >
+                All Withdrawals →
+              </button>
+            </div>
+
+            {userWithdrawals.length === 0 ? (
+              <div className="py-5 text-center text-slate-400 text-xs">
+                No withdrawal requests yet.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {userWithdrawals.slice(0, 3).map((wdr, idx) => {
+                  const isApproved = wdr.status === 'approved';
+                  const isRejected = wdr.status === 'rejected';
+                  const isProcessing = wdr.status === 'processing';
+                  return (
+                    <motion.div
+                      key={wdr.id}
+                      initial={{ opacity: 0, x: 8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.18, delay: idx * 0.04 }}
+                      className="p-3 rounded-xl bg-[#070c10] border border-white/[0.06] text-xs space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono-numbers font-bold text-white text-xs">
+                          {wdr.amount.toLocaleString()} Coins ·{' '}
+                          <span className="text-slate-400 font-normal">{wdr.payoutMethod}</span>
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                            isApproved
+                              ? 'bg-emerald-500/15 text-[#14e071]'
+                              : isRejected
+                                ? 'bg-rose-500/15 text-rose-400'
+                                : isProcessing
+                                  ? 'bg-blue-500/15 text-blue-300'
+                                  : 'bg-amber-500/15 text-amber-300'
+                          }`}
+                        >
+                          {isApproved ? 'Completed' : isProcessing ? 'Processing' : isRejected ? 'Rejected' : 'Pending'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                        <span className="truncate font-mono-numbers">{wdr.payoutDetails}</span>
+                        <span className="shrink-0">
+                          {new Date(wdr.createdAt).toLocaleDateString([], {
+                            month: 'short',
+                            day: 'numeric'
+                          })}
+                        </span>
+                      </div>
+
+                      {wdr.proofImageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setViewingProofWithdrawal(wdr)}
+                          className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-[#14e071]/35 text-[#14e071] font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        >
+                          <ZoomIn className="w-3.5 h-3.5" />
+                          View Payout Screenshot
+                        </button>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </motion.div>
+
           {/* Recent Transaction History */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -791,7 +904,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                 Transaction History
               </h3>
               <button
-                onClick={() => onNavigateTab('wallet')}
+                type="button"
+                onClick={() => onOpenWalletTab('transactions')}
                 className="text-[11px] font-semibold text-[#14e071] hover:text-emerald-300 transition cursor-pointer"
               >
                 Full Ledger →
@@ -807,13 +921,17 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                 {userTransactions.map((tx, idx) => {
                   const isPositive = tx.amount > 0;
                   const isNeutral = tx.amount === 0;
+                  const linkedWdr =
+                    tx.type === 'withdrawal' && tx.referenceId
+                      ? withdrawalById.get(tx.referenceId)
+                      : undefined;
                   return (
                     <motion.div
                       key={tx.id}
                       initial={{ opacity: 0, x: 8 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ duration: 0.18, delay: idx * 0.04 }}
-                      className="p-2.5 rounded-xl bg-[#070c10] border border-white/[0.06] flex items-center justify-between text-xs"
+                      className="p-2.5 rounded-xl bg-[#070c10] border border-white/[0.06] flex items-center justify-between text-xs gap-2"
                     >
                       <div className="flex items-center gap-2.5 overflow-hidden">
                         <div
@@ -846,6 +964,16 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                                 minute: '2-digit'
                               })}
                             </span>
+                            {linkedWdr?.proofImageUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setViewingProofWithdrawal(linkedWdr)}
+                                className="ml-1 px-1.5 py-0.2 rounded bg-emerald-500/15 text-[#14e071] border border-[#14e071]/35 font-semibold inline-flex items-center gap-0.5 cursor-pointer"
+                              >
+                                <ImageIcon className="w-2.5 h-2.5" />
+                                Proof
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -873,6 +1001,73 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
           </motion.div>
         </div>
       </div>
+
+      {/* PAYOUT SCREENSHOT LIGHTBOX MODAL */}
+      {viewingProofWithdrawal && viewingProofWithdrawal.proofImageUrl && (
+        <div
+          onClick={() => setViewingProofWithdrawal(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-fade-in"
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-xl bg-[#0a1116] border border-[#14e071]/35 rounded-2xl overflow-hidden shadow-2xl text-xs"
+          >
+            <div className="px-4 py-3 border-b border-white/[0.08] bg-[#070c10] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-bold text-sm text-white flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-[#14e071] shrink-0" />
+                  <span className="truncate">Withdrawal Payout Confirmation</span>
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono-numbers truncate">
+                  {viewingProofWithdrawal.amount.toLocaleString()} Coins · {viewingProofWithdrawal.payoutMethod} ({viewingProofWithdrawal.payoutDetails})
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingProofWithdrawal(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.08] cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-black flex items-center justify-center max-h-[68vh]">
+              <img
+                src={viewingProofWithdrawal.proofImageUrl}
+                alt="Admin payout confirmation screenshot"
+                className="max-h-[62vh] w-auto object-contain rounded-lg"
+              />
+            </div>
+
+            <div className="px-4 py-3 border-t border-white/[0.08] bg-[#070c10] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="text-[11px] text-slate-400">
+                {viewingProofWithdrawal.adminRemark && (
+                  <div className="text-amber-300 font-medium">
+                    Note: {viewingProofWithdrawal.adminRemark}
+                  </div>
+                )}
+                <div>
+                  Uploaded:{' '}
+                  {new Date(viewingProofWithdrawal.reviewedAt || viewingProofWithdrawal.createdAt).toLocaleString([], {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
+              </div>
+              <a
+                href={viewingProofWithdrawal.proofImageUrl}
+                download={`withdrawal-proof-${viewingProofWithdrawal.id}.jpg`}
+                className="px-3.5 py-2 rounded-xl apex-glow-btn font-bold text-xs flex items-center justify-center gap-1.5 shrink-0"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download Receipt
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
