@@ -142,6 +142,7 @@ export interface WithdrawalRequest {
   reviewedAt?: string;
   reviewedBy?: string;
   adminRemark?: string;
+  proofImageUrl?: string;
   ownerUid?: string;
 }
 

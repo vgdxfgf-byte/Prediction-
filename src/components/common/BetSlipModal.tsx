@@ -18,6 +18,11 @@ import {
   Activity
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import {
+  isClosingTimePassed,
+  isMarketBettingOpen,
+  formatCountdownToClose
+} from '../../utils/marketTiming';
 
 interface BetSlipModalProps {
   prediction: Prediction | null;
@@ -34,11 +39,12 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
   onSuccessViewHistory,
   onOpenDeposit
 }) => {
-  const { currentUser, placeBet } = useApp();
+  const { currentUser, placeBet, nowMs } = useApp();
   const [choice, setChoice] = useState<'YES' | 'NO'>(initialChoice);
   const [amount, setAmount] = useState<number>(100);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [imgFailed, setImgFailed] = useState<boolean>(false);
+  const [liveNowMs, setLiveNowMs] = useState<number>(() => Date.now());
   const [successData, setSuccessData] = useState<{
     betId: string;
     payout: number;
@@ -53,9 +59,24 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
     setErrorMsg('');
     setImgFailed(false);
     setSuccessData(null);
+    setLiveNowMs(Date.now());
   }, [prediction, initialChoice]);
 
+  useEffect(() => {
+    if (!prediction || successData) return;
+    const timer = window.setInterval(() => {
+      setLiveNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [prediction, successData]);
+
   if (!prediction) return null;
+
+  const effectiveNowMs = Math.max(nowMs, liveNowMs);
+  const isExpired = isClosingTimePassed(prediction.closingTime, effectiveNowMs);
+  const isBettingOpen = isMarketBettingOpen(prediction, effectiveNowMs);
+  const isPausedOrClosed = !isBettingOpen;
+  const countdownText = formatCountdownToClose(prediction.closingTime, effectiveNowMs);
 
   const odds = choice === 'YES' ? prediction.yesOdds : prediction.noOdds;
   const potentialWinnings = Math.round(amount * odds);
@@ -87,6 +108,14 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
     e.preventDefault();
     if (!currentUser) {
       setErrorMsg('Please log in first to place predictions');
+      return;
+    }
+    if (!isBettingOpen) {
+      setErrorMsg(
+        isExpired
+          ? "Betting automatically paused because this market's closing date & time has passed."
+          : 'Betting is currently paused for this market.'
+      );
       return;
     }
     if (amount < prediction.minBet) {
@@ -240,8 +269,14 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-[#0a1116] via-black/30 to-transparent" />
-                <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-md bg-[#14e071] text-[#04130b] text-[10px] font-black uppercase tracking-wider">
-                  Live
+                <span
+                  className={`absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
+                    isBettingOpen
+                      ? 'bg-[#14e071] text-[#04130b]'
+                      : 'bg-amber-400 text-[#1a1102]'
+                  }`}
+                >
+                  {isBettingOpen ? 'Live' : isExpired ? 'Auto-Paused' : 'Paused'}
                 </span>
               </div>
             )}
@@ -271,13 +306,30 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
               )}
             </div>
 
+            {isPausedOrClosed && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/35 text-amber-300 text-xs flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                <div>
+                  <div className="font-bold">Betting Automatically Paused</div>
+                  <div className="text-[11px] text-amber-200/85 mt-0.5">
+                    {isExpired
+                      ? 'The market closing date and time has passed. New predictions are locked.'
+                      : 'This market is currently paused by the administrator.'}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Screen 2 Big YES / NO Selector Cards */}
             <div className="grid grid-cols-2 gap-3">
               <motion.button
                 type="button"
-                whileTap={{ scale: 0.97 }}
+                disabled={isPausedOrClosed}
+                whileTap={{ scale: isPausedOrClosed ? 1 : 0.97 }}
                 onClick={() => setChoice('YES')}
-                className={`py-3.5 px-4 rounded-xl border font-bold flex flex-col items-center justify-center gap-1 transition cursor-pointer ${
+                className={`py-3.5 px-4 rounded-xl border font-bold flex flex-col items-center justify-center gap-1 transition ${
+                  isPausedOrClosed ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                } ${
                   choice === 'YES'
                     ? 'border-[#14e071] bg-gradient-to-b from-emerald-950/80 to-emerald-950/35 text-white shadow-[0_0_24px_-8px_rgba(20,224,113,0.65)]'
                     : 'border-white/[0.08] bg-[#0e171e] text-slate-400 hover:border-emerald-500/40'
@@ -294,9 +346,12 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
 
               <motion.button
                 type="button"
-                whileTap={{ scale: 0.97 }}
+                disabled={isPausedOrClosed}
+                whileTap={{ scale: isPausedOrClosed ? 1 : 0.97 }}
                 onClick={() => setChoice('NO')}
-                className={`py-3.5 px-4 rounded-xl border font-bold flex flex-col items-center justify-center gap-1 transition cursor-pointer ${
+                className={`py-3.5 px-4 rounded-xl border font-bold flex flex-col items-center justify-center gap-1 transition ${
+                  isPausedOrClosed ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                } ${
                   choice === 'NO'
                     ? 'border-rose-500 bg-gradient-to-b from-rose-950/80 to-rose-950/35 text-white shadow-[0_0_24px_-8px_rgba(244,63,94,0.6)]'
                     : 'border-white/[0.08] bg-[#0e171e] text-slate-400 hover:border-rose-500/40'
@@ -315,12 +370,15 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
             {/* Closes In & Total Pool Info Bar (Screen 2 style) */}
             <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-[#070c10] border border-white/[0.07] text-xs">
               <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                <Clock className={`w-4 h-4 shrink-0 ${isExpired ? 'text-amber-400' : 'text-slate-400'}`} />
                 <div>
                   <div className="text-[10px] text-slate-500">Closes At</div>
                   <div className="font-mono-numbers font-semibold text-slate-200 text-[11px]">
                     {closeDate.toLocaleDateString([], { month: 'short', day: 'numeric' })},{' '}
                     {closeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                  <div className={`font-mono-numbers text-[10px] font-semibold ${isExpired ? 'text-amber-400' : 'text-[#14e071]'}`}>
+                    {countdownText}
                   </div>
                 </div>
               </div>
@@ -348,6 +406,7 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
                 <Coins className="w-4 h-4 text-amber-400 absolute left-3.5 top-3.5" />
                 <input
                   type="number"
+                  disabled={isPausedOrClosed}
                   min={prediction.minBet}
                   max={prediction.maxBet}
                   value={amount || ''}
@@ -355,7 +414,7 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
                     setAmount(Number(e.target.value));
                     setErrorMsg('');
                   }}
-                  className="w-full bg-[#060b0e] border border-white/[0.12] focus:border-[#14e071] rounded-xl pl-10 pr-16 py-3 font-mono-numbers text-base font-bold text-white outline-none transition"
+                  className="w-full bg-[#060b0e] border border-white/[0.12] focus:border-[#14e071] disabled:opacity-50 rounded-xl pl-10 pr-16 py-3 font-mono-numbers text-base font-bold text-white outline-none transition"
                   placeholder="100"
                 />
                 <span className="absolute right-3.5 top-3.5 text-slate-500 font-bold text-[11px] uppercase">
@@ -368,16 +427,18 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
                   <button
                     key={val}
                     type="button"
+                    disabled={isPausedOrClosed}
                     onClick={() => handleQuickAdd(val)}
-                    className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#111b22] hover:bg-[#16242d] text-slate-200 text-xs font-mono-numbers font-semibold border border-white/[0.08] transition cursor-pointer"
+                    className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#111b22] hover:bg-[#16242d] disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xs font-mono-numbers font-semibold border border-white/[0.08] transition cursor-pointer"
                   >
                     +{val}
                   </button>
                 ))}
                 <button
                   type="button"
+                  disabled={isPausedOrClosed}
                   onClick={handleSetMax}
-                  className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#111b22] hover:bg-emerald-500/15 text-[#14e071] text-xs font-bold border border-emerald-500/30 transition cursor-pointer"
+                  className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#111b22] hover:bg-emerald-500/15 disabled:opacity-50 disabled:cursor-not-allowed text-[#14e071] text-xs font-bold border border-emerald-500/30 transition cursor-pointer"
                 >
                   Max
                 </button>
@@ -423,11 +484,13 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
             {/* Full-Width Primary CTA Button (Screen 2 style) */}
             <motion.button
               type="submit"
-              whileTap={{ scale: 0.98 }}
-              disabled={isInsufficient || amount < prediction.minBet}
-              className="w-full py-3 rounded-xl apex-glow-btn disabled:opacity-50 font-black text-sm tracking-wide transition cursor-pointer"
+              whileTap={{ scale: isPausedOrClosed ? 1 : 0.98 }}
+              disabled={isPausedOrClosed || isInsufficient || amount < prediction.minBet}
+              className="w-full py-3 rounded-xl apex-glow-btn disabled:opacity-50 disabled:cursor-not-allowed font-black text-sm tracking-wide transition cursor-pointer"
             >
-              Place Prediction ({choice} · {amount} Coins)
+              {isPausedOrClosed
+                ? 'Betting Paused · Market Closed'
+                : `Place Prediction (${choice} · ${amount} Coins)`}
             </motion.button>
 
             <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500 pt-0.5">

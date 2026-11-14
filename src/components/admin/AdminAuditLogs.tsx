@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { History, Search, Filter, ShieldCheck, Coins, Trophy, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { Search } from 'lucide-react';
 
 export const AdminAuditLogs: React.FC = () => {
-  const { coinLogs, transactions, predictions, bets } = useApp();
+  const { coinLogs, predictions, deposits, withdrawals } = useApp();
 
   const [filterType, setFilterType] = useState<'all' | 'coin_adjust' | 'settlement' | 'deposit_withdraw'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,15 +30,37 @@ export const AdminAuditLogs: React.FC = () => {
       typeBadge: 'SETTLEMENT',
       badgeColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
     })),
-    ...transactions.filter(t => t.type === 'deposit' || t.type === 'withdrawal').map(t => ({
-      id: t.id,
+    ...deposits.map(d => ({
+      id: d.id,
       category: 'deposit_withdraw' as const,
-      title: `${t.type === 'deposit' ? 'Deposit Approved' : 'Withdrawal Request'}: ${Math.abs(t.amount)} 🪙 for @${t.username}`,
-      details: t.description,
-      actor: t.username,
-      timestamp: t.createdAt,
-      typeBadge: t.type.toUpperCase(),
-      badgeColor: t.type === 'deposit' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-purple-400 bg-purple-500/10 border-purple-500/20'
+      title: `Deposit ${d.status === 'approved' ? 'Completed' : d.status.toUpperCase()}: +${d.amount.toLocaleString()} 🪙 for @${d.username}`,
+      details: `${d.paymentMethod} · Ref: ${d.referenceNumber}${d.adminRemark ? ` · ${d.adminRemark}` : ''}`,
+      actor: d.reviewedBy || d.username,
+      timestamp: d.reviewedAt || d.createdAt,
+      typeBadge: `DEPOSIT · ${d.status === 'approved' ? 'COMPLETED' : d.status.toUpperCase()}`,
+      badgeColor:
+        d.status === 'approved'
+          ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+          : d.status === 'rejected'
+            ? 'text-rose-400 bg-rose-500/10 border-rose-500/20'
+            : 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+    })),
+    ...withdrawals.map(w => ({
+      id: w.id,
+      category: 'deposit_withdraw' as const,
+      title: `Withdrawal ${w.status === 'approved' ? 'Completed' : w.status.toUpperCase()}: ${w.amount.toLocaleString()} 🪙 for @${w.username}`,
+      details: `${w.payoutMethod}: ${w.payoutDetails}${w.proofImageUrl ? ' · Screenshot Attached ✓' : ''}${w.adminRemark ? ` · ${w.adminRemark}` : ''}`,
+      actor: w.reviewedBy || w.username,
+      timestamp: w.reviewedAt || w.createdAt,
+      typeBadge: `WITHDRAWAL · ${w.status === 'approved' ? 'COMPLETED' : w.status.toUpperCase()}`,
+      badgeColor:
+        w.status === 'approved'
+          ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+          : w.status === 'rejected'
+            ? 'text-rose-400 bg-rose-500/10 border-rose-500/20'
+            : w.status === 'processing'
+              ? 'text-blue-400 bg-blue-500/10 border-blue-500/20'
+              : 'text-purple-400 bg-purple-500/10 border-purple-500/20'
     }))
   ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 

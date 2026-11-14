@@ -19,6 +19,12 @@ import {
   Coins
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import {
+  isClosingTimePassed,
+  isMarketBettingOpen,
+  toLocalDatetimeInputValue,
+  formatCountdownToClose
+} from '../../utils/marketTiming';
 
 interface AdminPredictionsProps {
   initialCreateOpen?: boolean;
@@ -46,7 +52,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setPredictionStatus, 
     deletePrediction, 
     settlePrediction,
-    bets 
+    bets,
+    nowMs
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,6 +62,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
   // Modals
   const [showCreateModal, setShowCreateModal] = useState<boolean>(!!initialCreateOpen);
   const [editPred, setEditPred] = useState<Prediction | null>(null);
+  const [reopenAfterEdit, setReopenAfterEdit] = useState<boolean>(false);
   const [settlePred, setSettlePred] = useState<Prediction | null>(null);
   const [deletePred, setDeletePred] = useState<Prediction | null>(null);
   const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
@@ -68,7 +76,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
   const [minBet, setMinBet] = useState<number>(50);
   const [maxBet, setMaxBet] = useState<number>(5000);
   const [closingTime, setClosingTime] = useState<string>(
-    new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16)
+    toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000))
   );
   const [description, setDescription] = useState('');
   const [formError, setFormError] = useState('');
@@ -79,7 +87,13 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
 
   // Filtered Predictions
   const filteredPredictions = predictions.filter(p => {
-    if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+    const autoPaused = p.status === 'open' && isClosingTimePassed(p.closingTime, nowMs);
+    if (statusFilter === 'open' && !isMarketBettingOpen(p, nowMs)) return false;
+    if (statusFilter === 'paused' && p.status !== 'paused' && !autoPaused) return false;
+    if ((statusFilter === 'closed' || statusFilter === 'settled') && p.status !== statusFilter) {
+      return false;
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const matchT = p.title.toLowerCase().includes(q);
@@ -98,7 +112,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setNoOdds(2.10);
     setMinBet(50);
     setMaxBet(5000);
-    setClosingTime(new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 16));
+    setClosingTime(toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
     setDescription('');
     setFormError('');
     setShowCreateModal(true);
@@ -120,6 +134,15 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       setFormError('Max prediction limit must be strictly greater than min bet');
       return;
     }
+    const closingDate = new Date(closingTime);
+    if (Number.isNaN(closingDate.getTime())) {
+      setFormError('Please select a valid closing date and time');
+      return;
+    }
+    if (closingDate.getTime() <= Date.now()) {
+      setFormError('Market closing date & time must be in the future');
+      return;
+    }
 
     const res = await createPrediction({
       title: title.trim(),
@@ -129,7 +152,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       noOdds: Number(noOdds),
       minBet: Number(minBet),
       maxBet: Number(maxBet),
-      closingTime: new Date(closingTime).toISOString(),
+      closingTime: closingDate.toISOString(),
       status: 'open',
       description: description.trim()
     });
@@ -142,8 +165,9 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     }
   };
 
-  const handleOpenEdit = (p: Prediction) => {
+  const handleOpenEdit = (p: Prediction, options?: { reopen?: boolean; reason?: string }) => {
     setEditPred(p);
+    setReopenAfterEdit(!!options?.reopen);
     setTitle(p.title);
     setSubtitle(p.subtitle);
     setCategory(p.category);
@@ -151,27 +175,60 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setNoOdds(p.noOdds);
     setMinBet(p.minBet);
     setMaxBet(p.maxBet);
-    setClosingTime(new Date(p.closingTime).toISOString().slice(0, 16));
+    setClosingTime(toLocalDatetimeInputValue(p.closingTime));
     setDescription(p.description || '');
+    setFormError(options?.reason || '');
   };
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editPred) return;
+    setFormError('');
 
-    await updatePrediction(editPred.id, {
-      title,
+    if (!title.trim()) {
+      setFormError('Prediction question is required');
+      return;
+    }
+    if (yesOdds <= 1 || noOdds <= 1) {
+      setFormError('Odds must be strictly greater than 1.00');
+      return;
+    }
+    const closingDate = new Date(closingTime);
+    if (Number.isNaN(closingDate.getTime())) {
+      setFormError('Please select a valid closing date and time');
+      return;
+    }
+    if (reopenAfterEdit && closingDate.getTime() <= Date.now()) {
+      setFormError('Extend the closing date & time into the future to reopen betting');
+      return;
+    }
+
+    const nextStatus: PredictionStatus =
+      reopenAfterEdit
+        ? 'open'
+        : editPred.status === 'open' && closingDate.getTime() <= Date.now()
+          ? 'paused'
+          : editPred.status;
+
+    const res = await updatePrediction(editPred.id, {
+      title: title.trim(),
       subtitle,
       category,
       yesOdds: Number(yesOdds),
       noOdds: Number(noOdds),
       minBet: Number(minBet),
       maxBet: Number(maxBet),
-      closingTime: new Date(closingTime).toISOString(),
+      closingTime: closingDate.toISOString(),
+      status: nextStatus,
       description
     });
 
-    setEditPred(null);
+    if (res.success) {
+      setEditPred(null);
+      setReopenAfterEdit(false);
+    } else {
+      setFormError(res.error || 'Failed to save prediction');
+    }
   };
 
   const handleOpenSettle = (p: Prediction) => {
@@ -302,8 +359,10 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                 filteredPredictions.map(pred => {
                   const predBets = bets.filter(b => b.predictionId === pred.id);
                   const isSettled = pred.status === 'settled';
-                  const isOpen = pred.status === 'open';
-                  const isPaused = pred.status === 'paused';
+                  const isExpired = isClosingTimePassed(pred.closingTime, nowMs);
+                  const isAutoPaused = pred.status === 'open' && isExpired;
+                  const isOpen = isMarketBettingOpen(pred, nowMs);
+                  const isPaused = pred.status === 'paused' || isAutoPaused;
                   const isClosed = pred.status === 'closed';
 
                   return (
@@ -311,9 +370,16 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                       <td className="px-4 py-3.5 max-w-sm">
                         <div className="font-bold text-white text-xs">{pred.title}</div>
                         <div className="text-[11px] text-slate-400 mt-0.5 truncate">{pred.subtitle}</div>
-                        <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
-                          <Clock className="w-3 h-3" />
-                          Closes: {new Date(pred.closingTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                          <Clock className="w-3 h-3 shrink-0" />
+                          <span>
+                            Closes: {new Date(pred.closingTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {!isSettled && (
+                            <span className={`font-semibold ${isExpired ? 'text-amber-400' : 'text-emerald-400'}`}>
+                              · {formatCountdownToClose(pred.closingTime, nowMs)}
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -354,9 +420,16 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                           </span>
                         )}
                         {isPaused && (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold">
-                            PAUSED
-                          </span>
+                          <div className="flex flex-col items-start gap-0.5">
+                            <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold">
+                              {isAutoPaused ? 'AUTO-PAUSED' : 'PAUSED'}
+                            </span>
+                            {isExpired && (
+                              <span className="text-[10px] text-amber-300/80">
+                                Closing time passed
+                              </span>
+                            )}
+                          </div>
                         )}
                         {isClosed && (
                           <span className="px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 text-[10px] font-bold">
@@ -390,9 +463,27 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                           {/* Pause / Resume */}
                           {!isSettled && (
                             <button
-                              onClick={() => setPredictionStatus(pred.id, isOpen ? 'paused' : 'open')}
-                              title={isOpen ? 'Pause Betting' : 'Resume Betting'}
-                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                              onClick={() => {
+                                if (isOpen) {
+                                  setPredictionStatus(pred.id, 'paused');
+                                } else if (isExpired) {
+                                  handleOpenEdit(pred, {
+                                    reopen: true,
+                                    reason:
+                                      'Closing date & time has already passed. Extend the closing date & time into the future to reopen betting.'
+                                  });
+                                } else {
+                                  setPredictionStatus(pred.id, 'open');
+                                }
+                              }}
+                              title={
+                                isOpen
+                                  ? 'Pause Betting'
+                                  : isExpired
+                                    ? 'Extend Closing Time to Resume'
+                                    : 'Resume Betting'
+                              }
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
                             >
                               {isOpen ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
                             </button>
@@ -403,7 +494,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                             <button
                               onClick={() => setPredictionStatus(pred.id, 'closed')}
                               title="Close Betting"
-                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
                             >
                               <Lock className="w-3.5 h-3.5" />
                             </button>
@@ -414,7 +505,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                             <button
                               onClick={() => handleOpenEdit(pred)}
                               title="Edit Prediction"
-                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 transition"
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 transition cursor-pointer"
                             >
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
@@ -624,12 +715,20 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                 <Edit3 className="w-4 h-4 text-amber-400" />
                 Edit Prediction Market
               </h3>
-              <button onClick={() => setEditPred(null)} className="text-slate-400 hover:text-white">✕</button>
+              <button
+                onClick={() => {
+                  setEditPred(null);
+                  setReopenAfterEdit(false);
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
 
             <form onSubmit={handleEditSubmit} className="space-y-3">
               <div>
-                <label className="text-slate-300 font-semibold block">Question:</label>
+                <label className="text-slate-300 font-semibold block mb-1">Question:</label>
                 <input
                   type="text"
                   required
@@ -641,20 +740,22 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-300 font-semibold block">YES Odds:</label>
+                  <label className="text-slate-300 font-semibold block mb-1">YES Odds:</label>
                   <input
                     type="number"
                     step="0.01"
+                    min="1.01"
                     value={yesOdds}
                     onChange={e => setYesOdds(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono outline-none"
                   />
                 </div>
                 <div>
-                  <label className="text-slate-300 font-semibold block">NO Odds:</label>
+                  <label className="text-slate-300 font-semibold block mb-1">NO Odds:</label>
                   <input
                     type="number"
                     step="0.01"
+                    min="1.01"
                     value={noOdds}
                     onChange={e => setNoOdds(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono outline-none"
@@ -662,19 +763,82 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                 </div>
               </div>
 
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-300 font-semibold">Market Closing Date & Time *</label>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClosingTime(toLocalDatetimeInputValue(new Date(Date.now() + 3600 * 1000)));
+                        setFormError('');
+                      }}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-400 font-semibold text-[10px] cursor-pointer"
+                    >
+                      +1h from now
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClosingTime(toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
+                        setFormError('');
+                      }}
+                      className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-emerald-400 font-semibold text-[10px] cursor-pointer"
+                    >
+                      +24h from now
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="datetime-local"
+                  required
+                  value={closingTime}
+                  onChange={e => {
+                    setClosingTime(e.target.value);
+                    setFormError('');
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-white outline-none"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Betting automatically pauses once this date & time is reached.
+                </p>
+              </div>
+
+              {editPred.status !== 'open' && (
+                <label className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={reopenAfterEdit}
+                    onChange={e => setReopenAfterEdit(e.target.checked)}
+                    className="rounded accent-emerald-500"
+                  />
+                  <span>Reopen betting immediately after saving (requires future closing time)</span>
+                </label>
+              )}
+
+              {formError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setEditPred(null)}
-                  className="w-1/3 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-semibold"
+                  onClick={() => {
+                    setEditPred(null);
+                    setReopenAfterEdit(false);
+                  }}
+                  className="w-1/3 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-semibold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold uppercase tracking-wider"
+                  className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold uppercase tracking-wider cursor-pointer"
                 >
-                  Save Changes
+                  {reopenAfterEdit ? 'Save & Reopen Betting' : 'Save Changes'}
                 </button>
               </div>
             </form>

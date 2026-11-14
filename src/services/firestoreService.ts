@@ -41,6 +41,7 @@ import type {
   IdChatMessage,
   IdChatStatus
 } from '../types';
+import { isClosingTimePassed } from '../utils/marketTiming';
 
 export const BOOTSTRAPPED_ADMIN_EMAIL = 'vgdxfgf@gmail.com';
 
@@ -182,6 +183,7 @@ function mapWithdrawalDoc(id: string, data: Record<string, unknown>): Withdrawal
     reviewedAt: data.reviewedAt ? String(data.reviewedAt) : undefined,
     reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
     adminRemark: data.adminRemark ? String(data.adminRemark) : undefined,
+    proofImageUrl: data.proofImageUrl ? String(data.proofImageUrl) : undefined,
     ownerUid: data.ownerUid ? String(data.ownerUid) : undefined
   };
 }
@@ -796,15 +798,37 @@ export async function fsPlaceBet(
   choice: 'YES' | 'NO',
   amount: number
 ): Promise<{ success: boolean; error?: string; betId?: string }> {
-  if (prediction.status !== 'open') return { success: false, error: 'Market is not open for predictions' };
+  if (prediction.status !== 'open') return { success: false, error: 'Betting is paused — market is not open' };
+  if (isClosingTimePassed(prediction.closingTime)) {
+    return { success: false, error: 'Betting is automatically paused — market closing date & time has passed' };
+  }
   if (!Number.isFinite(amount) || amount < prediction.minBet || amount > prediction.maxBet) {
     return { success: false, error: `Amount must be between ${prediction.minBet} and ${prediction.maxBet}` };
   }
   if (user.coins < amount) return { success: false, error: 'Insufficient coin balance' };
 
-  const odds = choice === 'YES' ? prediction.yesOdds : prediction.noOdds;
-  const betId = `bet_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-  const txId = `tx_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  // Re-verify latest live market state & closing time from Firestore before committing
+  let livePred = prediction;
+  try {
+    const liveSnap = await getDoc(doc(db, 'predictions', prediction.id));
+    if (!liveSnap.exists()) {
+      return { success: false, error: 'Prediction market no longer exists' };
+    }
+    livePred = mapPredictionDoc(liveSnap.id, liveSnap.data());
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, `predictions/${prediction.id}`);
+  }
+
+  if (livePred.status !== 'open') {
+    return { success: false, error: 'Betting is currently paused or closed for this market' };
+  }
+  if (isClosingTimePassed(livePred.closingTime)) {
+    return { success: false, error: 'Betting is automatically paused — market closing date & time has passed' };
+  }
+
+  const odds = choice === 'YES' ? livePred.yesOdds : livePred.noOdds;
+  const betId = createUniqueTxId('bet');
+  const txId = createUniqueTxId('tx');
   const newBalance = user.coins - amount;
   const potentialWinnings = Math.round(amount * odds);
 
@@ -818,9 +842,9 @@ export async function fsPlaceBet(
     userId: user.id,
     ownerUid: authUid,
     username: user.username,
-    predictionId: prediction.id,
-    predictionTitle: prediction.title.slice(0, 240),
-    predictionCategory: prediction.category,
+    predictionId: livePred.id,
+    predictionTitle: livePred.title.slice(0, 240),
+    predictionCategory: livePred.category,
     choice,
     odds,
     amount,
@@ -841,15 +865,15 @@ export async function fsPlaceBet(
     balanceBefore: user.coins,
     balanceAfter: newBalance,
     status: 'completed',
-    description: `Stake on "${prediction.title.slice(0, 60)}" (${choice} @ ${odds}x)`.slice(0, 300),
+    description: `Stake on "${livePred.title.slice(0, 60)}" (${choice} @ ${odds}x)`.slice(0, 300),
     referenceId: betId,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
-  batch.update(doc(db, 'predictions', prediction.id), {
-    totalYesVolume: choice === 'YES' ? prediction.totalYesVolume + amount : prediction.totalYesVolume,
-    totalNoVolume: choice === 'NO' ? prediction.totalNoVolume + amount : prediction.totalNoVolume,
-    totalParticipants: prediction.totalParticipants + 1,
+  batch.update(doc(db, 'predictions', livePred.id), {
+    totalYesVolume: choice === 'YES' ? livePred.totalYesVolume + amount : livePred.totalYesVolume,
+    totalNoVolume: choice === 'NO' ? livePred.totalNoVolume + amount : livePred.totalNoVolume,
+    totalParticipants: livePred.totalParticipants + 1,
     updatedAt: serverTimestamp()
   });
 
@@ -1700,16 +1724,27 @@ export async function fsReviewDeposit(
   }
 }
 
+const VALID_PROOF_DATA_URL_RE = /^data:image\/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
 export async function fsReviewWithdrawal(
   withdrawal: WithdrawalRequest,
   action: 'approve' | 'reject' | 'processing',
   adminUsername: string,
   targetUser: User | undefined,
-  adminRemark?: string
+  adminRemark?: string,
+  proofImageUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
   const status = action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'processing';
   const txStatus = action === 'approve' ? 'completed' : action === 'reject' ? 'rejected' : 'processing';
   const ownerUid = await resolveUserOwnerUid(withdrawal.userId, targetUser?.ownerUid || withdrawal.ownerUid);
+
+  const cleanProofUrl =
+    action === 'approve' &&
+    proofImageUrl &&
+    proofImageUrl.length <= 500000 &&
+    VALID_PROOF_DATA_URL_RE.test(proofImageUrl)
+      ? proofImageUrl
+      : undefined;
 
   // Locate original pending/processing withdrawal transaction so its status stays in sync
   let existingTxDocs: { id: string }[] = [];
@@ -1724,14 +1759,19 @@ export async function fsReviewWithdrawal(
     // Proceed even if lookup finds nothing
   }
 
-  const batch = writeBatch(db);
-  batch.update(doc(db, 'withdrawals', withdrawal.id), {
+  const withdrawalUpdates: Record<string, unknown> = {
     status,
     reviewedAt: new Date().toISOString(),
     reviewedBy: adminUsername.slice(0, 64),
     adminRemark: adminRemark ? adminRemark.trim().slice(0, 400) : '',
     updatedAt: serverTimestamp()
-  });
+  };
+  if (cleanProofUrl) {
+    withdrawalUpdates.proofImageUrl = cleanProofUrl;
+  }
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'withdrawals', withdrawal.id), withdrawalUpdates);
 
   for (const txDoc of existingTxDocs) {
     batch.update(doc(db, 'transactions', txDoc.id), {
@@ -1769,6 +1809,37 @@ export async function fsReviewWithdrawal(
 
   try {
     await batch.commit();
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `withdrawals/${withdrawal.id}`);
+  }
+}
+
+export async function fsUploadWithdrawalProof(
+  withdrawal: WithdrawalRequest,
+  proofImageUrl: string,
+  adminUsername: string,
+  adminRemark?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!proofImageUrl || proofImageUrl.length > 500000 || !VALID_PROOF_DATA_URL_RE.test(proofImageUrl)) {
+    return {
+      success: false,
+      error: 'Invalid or oversized screenshot. Please upload a JPG, PNG, or WebP image.'
+    };
+  }
+
+  const updates: Record<string, unknown> = {
+    proofImageUrl,
+    reviewedAt: new Date().toISOString(),
+    reviewedBy: adminUsername.slice(0, 64),
+    updatedAt: serverTimestamp()
+  };
+  if (typeof adminRemark === 'string') {
+    updates.adminRemark = adminRemark.trim().slice(0, 400);
+  }
+
+  try {
+    await updateDoc(doc(db, 'withdrawals', withdrawal.id), updates);
     return { success: true };
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `withdrawals/${withdrawal.id}`);

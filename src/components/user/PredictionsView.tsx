@@ -11,6 +11,11 @@ import {
   Film,
   Activity
 } from 'lucide-react';
+import {
+  isClosingTimePassed,
+  isMarketBettingOpen,
+  formatCountdownToClose
+} from '../../utils/marketTiming';
 
 interface PredictionsViewProps {
   onSelectPrediction: (pred: Prediction, choice: 'YES' | 'NO') => void;
@@ -28,16 +33,21 @@ const CATEGORIES: ('All' | PredictionCategory)[] = [
 ];
 
 export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPrediction }) => {
-  const { predictions, bets, currentUser } = useApp();
+  const { predictions, bets, currentUser, nowMs } = useApp();
 
   const [selectedCategory, setSelectedCategory] = useState<'All' | PredictionCategory>('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'open' | 'all' | 'settled'>('open');
+  const [statusFilter, setStatusFilter] = useState<'open' | 'paused' | 'settled' | 'all'>('open');
 
   // Filter predictions
   const filteredPredictions = predictions.filter(p => {
     if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
-    if (statusFilter === 'open' && p.status !== 'open') return false;
+
+    const marketOpen = isMarketBettingOpen(p, nowMs);
+    const autoPaused = p.status === 'open' && isClosingTimePassed(p.closingTime, nowMs);
+
+    if (statusFilter === 'open' && !marketOpen) return false;
+    if (statusFilter === 'paused' && p.status !== 'paused' && !autoPaused) return false;
     if (statusFilter === 'settled' && p.status !== 'settled') return false;
 
     if (searchQuery.trim()) {
@@ -131,6 +141,16 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
             Open
           </button>
           <button
+            onClick={() => setStatusFilter('paused')}
+            className={`px-2.5 py-1 rounded-lg font-semibold whitespace-nowrap transition cursor-pointer ${
+              statusFilter === 'paused'
+                ? 'bg-amber-500/15 text-amber-400'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Paused
+          </button>
+          <button
             onClick={() => setStatusFilter('settled')}
             className={`px-2.5 py-1 rounded-lg font-semibold whitespace-nowrap transition cursor-pointer ${
               statusFilter === 'settled'
@@ -168,10 +188,12 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredPredictions.map((pred, idx) => {
             const closeDate = new Date(pred.closingTime);
-            const isClosed = pred.status === 'closed' || closeDate.getTime() <= Date.now();
+            const isExpired = isClosingTimePassed(pred.closingTime, nowMs);
             const isSettled = pred.status === 'settled';
-            const isPaused = pred.status === 'paused';
-            const isOpen = pred.status === 'open' && !isClosed;
+            const isClosed = pred.status === 'closed';
+            const isAutoPaused = pred.status === 'open' && isExpired;
+            const isPaused = pred.status === 'paused' || isAutoPaused;
+            const isOpen = isMarketBettingOpen(pred, nowMs);
 
             const userExistingBets = currentUser
               ? bets.filter(b => b.userId === currentUser.id && b.predictionId === pred.id)
@@ -204,7 +226,11 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
                     </span>
 
                     {isOpen && <span className="text-[#14e071] text-[10px] font-bold shrink-0">Live</span>}
-                    {isPaused && <span className="text-amber-400 text-[10px] font-bold shrink-0">Paused</span>}
+                    {isPaused && (
+                      <span className="text-amber-400 text-[10px] font-bold shrink-0">
+                        {isAutoPaused ? 'Auto-Paused' : 'Paused'}
+                      </span>
+                    )}
                     {isClosed && !isSettled && (
                       <span className="text-slate-400 text-[10px] font-semibold shrink-0">Settling</span>
                     )}
@@ -258,13 +284,20 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
                 )}
 
                 <div className="mt-4 pt-3 border-t border-white/[0.06] space-y-3">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono-numbers">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-slate-500" />
-                      {closeDate.toLocaleDateString([], { month: 'short', day: 'numeric' })},{' '}
-                      {closeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono-numbers gap-2">
+                    <span className="flex items-center gap-1 min-w-0">
+                      <Clock className={`w-3.5 h-3.5 shrink-0 ${isOpen ? 'text-[#14e071]' : 'text-slate-500'}`} />
+                      <span className="truncate">
+                        {closeDate.toLocaleDateString([], { month: 'short', day: 'numeric' })},{' '}
+                        {closeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {!isSettled && (
+                          <span className={`ml-1.5 font-semibold ${isExpired ? 'text-amber-400' : 'text-[#14e071]'}`}>
+                            · {formatCountdownToClose(pred.closingTime, nowMs)}
+                          </span>
+                        )}
+                      </span>
                     </span>
-                    <span>
+                    <span className="shrink-0">
                       {pred.minBet}–{pred.maxBet} coins
                     </span>
                   </div>
@@ -319,8 +352,12 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
                           </span>
                         </div>
                       ) : (
-                        <div className="text-xs text-slate-400">
-                          {isPaused ? 'Market paused by admin' : 'Market closed. Result pending.'}
+                        <div className={`text-xs ${isPaused ? 'text-amber-300 font-medium' : 'text-slate-400'}`}>
+                          {isAutoPaused || (isPaused && isExpired)
+                            ? 'Closing time reached · Betting automatically paused'
+                            : isPaused
+                              ? 'Market paused by admin'
+                              : 'Market closed. Result pending.'}
                         </div>
                       )}
                     </div>

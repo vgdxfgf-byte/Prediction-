@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { onAuthStateChanged, type User as FirebaseAuthUser } from 'firebase/auth';
 import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { isClosingTimePassed, isMarketBettingOpen } from '../utils/marketTiming';
 import {
   BOOTSTRAPPED_ADMIN_EMAIL,
   checkIsFirebaseAdmin,
@@ -17,6 +18,7 @@ import {
   fsResetUserPassword,
   fsReviewDeposit,
   fsReviewWithdrawal,
+  fsUploadWithdrawalProof,
   fsSettlePrediction,
   fsToggleUserStatus,
   fsUpdateGlobalPaymentGateway,
@@ -95,6 +97,7 @@ interface AppContextType {
   withdrawals: WithdrawalRequest[];
   coinLogs: CoinAdjustmentLog[];
   stats: PlatformStats;
+  nowMs: number;
 
   // User Actions
   placeBet: (predictionId: string, choice: 'YES' | 'NO', amount: number) => Promise<ActionResult & { betId?: string }>;
@@ -136,6 +139,12 @@ interface AppContextType {
   reviewWithdrawal: (
     withdrawalId: string,
     action: 'approve' | 'reject' | 'processing',
+    adminRemark?: string,
+    proofImageUrl?: string
+  ) => Promise<ActionResult>;
+  uploadWithdrawalProof: (
+    withdrawalId: string,
+    proofImageUrl: string,
     adminRemark?: string
   ) => Promise<ActionResult>;
   paymentGateway: PaymentGatewayConfig;
@@ -259,6 +268,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsub();
   }, []);
 
+  // Synchronized market clock (ticks every 5 seconds to auto-pause markets at exact closing time)
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const autoPausedKeysRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, []);
+
   // Public predictions + WhatsApp support subscription (always live)
   useEffect(() => {
     const unsub = subscribePublicData({
@@ -267,6 +287,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     return () => unsub();
   }, []);
+
+  // Automatically persist status='paused' in Firestore for expired open markets when admin is signed in
+  useEffect(() => {
+    if (!adminUser || activePortal !== 'admin') return;
+    for (const pred of predictions) {
+      if (pred.status === 'open' && isClosingTimePassed(pred.closingTime, nowMs)) {
+        const key = `${pred.id}|${pred.closingTime}`;
+        if (!autoPausedKeysRef.current.has(key)) {
+          autoPausedKeysRef.current.add(key);
+          void fsUpdatePrediction(pred.id, { status: 'paused' }).catch(() => {
+            autoPausedKeysRef.current.delete(key);
+          });
+        }
+      }
+    }
+  }, [adminUser, activePortal, predictions, nowMs]);
 
   // Portal-specific Firestore subscriptions when Firebase Auth is ready
   useEffect(() => {
@@ -358,7 +394,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     suspendedUsers: regularUsers.filter(u => u.status === 'suspended').length,
     totalCoinsInCirculation: regularUsers.reduce((sum, u) => sum + u.coins, 0),
     totalPredictions: predictions.length,
-    openPredictions: predictions.filter(p => p.status === 'open').length,
+    openPredictions: predictions.filter(p => isMarketBettingOpen(p, nowMs)).length,
     settledPredictions: predictions.filter(p => p.status === 'settled').length,
     totalBetsPlaced: bets.length,
     totalBetVolume: bets.reduce((sum, b) => sum + b.amount, 0),
@@ -603,15 +639,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const reviewWithdrawal = async (
     withdrawalId: string,
     action: 'approve' | 'reject' | 'processing',
-    adminRemark?: string
+    adminRemark?: string,
+    proofImageUrl?: string
   ): Promise<ActionResult> => {
     const wdr = withdrawals.find(w => w.id === withdrawalId);
     if (!wdr) return { success: false, error: 'Withdrawal not found' };
     const targetUser = users.find(u => u.id === wdr.userId);
     try {
-      return await fsReviewWithdrawal(wdr, action, adminUser?.username || 'admin', targetUser, adminRemark);
+      return await fsReviewWithdrawal(
+        wdr,
+        action,
+        adminUser?.username || 'admin',
+        targetUser,
+        adminRemark,
+        proofImageUrl
+      );
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to review withdrawal' };
+    }
+  };
+
+  const uploadWithdrawalProof = async (
+    withdrawalId: string,
+    proofImageUrl: string,
+    adminRemark?: string
+  ): Promise<ActionResult> => {
+    const wdr = withdrawals.find(w => w.id === withdrawalId);
+    if (!wdr) return { success: false, error: 'Withdrawal not found' };
+    try {
+      return await fsUploadWithdrawalProof(
+        wdr,
+        proofImageUrl,
+        adminUser?.username || 'admin',
+        adminRemark
+      );
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to upload screenshot' };
     }
   };
 
@@ -724,6 +787,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         withdrawals,
         coinLogs,
         stats,
+        nowMs,
 
         placeBet,
         requestDeposit,
@@ -745,6 +809,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         reviewDeposit,
         reviewWithdrawal,
+        uploadWithdrawalProof,
         paymentGateway,
         updateGlobalPaymentGateway,
         updateUserPaymentGateway,

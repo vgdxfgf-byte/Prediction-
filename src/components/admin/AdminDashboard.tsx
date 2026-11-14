@@ -25,18 +25,22 @@ import {
 } from 'lucide-react';
 import { PaymentGatewayEditor } from './PaymentGatewayEditor';
 
+import type { AdminRequestsSubTab, AdminRequestsStatusFilter } from './AdminRequests';
+
 interface AdminDashboardProps {
   onNavigateTab: (tab: string) => void;
   onOpenCreateUser: () => void;
   onOpenCreatePrediction: () => void;
   onOpenPaymentGateway?: () => void;
+  onOpenRequests?: (subTab: AdminRequestsSubTab, status?: AdminRequestsStatusFilter) => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateTab,
   onOpenCreateUser,
   onOpenCreatePrediction,
-  onOpenPaymentGateway
+  onOpenPaymentGateway,
+  onOpenRequests
 }) => {
   const {
     stats,
@@ -337,7 +341,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <motion.button
           type="button"
           whileHover={{ y: -2 }}
-          onClick={() => onNavigateTab('requests')}
+          onClick={() => (onOpenRequests ? onOpenRequests('deposits', 'all') : onNavigateTab('requests'))}
           className="text-left rounded-2xl p-5 bg-gradient-to-br from-violet-950/60 via-[#141322] to-[#0b1217] border border-violet-500/25 hover:border-violet-400/50 transition cursor-pointer shadow-lg"
         >
           <div className="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-400/35 flex items-center justify-center mb-3">
@@ -356,7 +360,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <motion.button
           type="button"
           whileHover={{ y: -2 }}
-          onClick={() => onNavigateTab('requests')}
+          onClick={() => (onOpenRequests ? onOpenRequests('withdrawals', 'all') : onNavigateTab('requests'))}
           className="text-left rounded-2xl p-5 bg-gradient-to-br from-amber-950/55 via-[#1b1610] to-[#0b1217] border border-amber-500/25 hover:border-amber-400/50 transition cursor-pointer shadow-lg"
         >
           <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/35 flex items-center justify-center mb-3">
@@ -652,7 +656,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                   </div>
                   <button
-                    onClick={() => onNavigateTab('requests')}
+                    onClick={() => (onOpenRequests ? onOpenRequests('deposits', 'pending') : onNavigateTab('requests'))}
                     className="px-3 py-1.5 rounded-lg bg-emerald-500/15 text-[#14e071] hover:bg-[#14e071] hover:text-[#04130b] border border-[#14e071]/35 text-xs font-bold whitespace-nowrap shrink-0 transition cursor-pointer"
                   >
                     Review
@@ -661,7 +665,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               ))}
 
             {withdrawals
-              .filter(w => w.status === 'pending')
+              .filter(w => w.status === 'pending' || w.status === 'processing')
               .slice(0, 2)
               .map(wdr => (
                 <div
@@ -680,10 +684,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                   </div>
                   <button
-                    onClick={() => onNavigateTab('requests')}
+                    onClick={() => (onOpenRequests ? onOpenRequests('withdrawals', 'pending') : onNavigateTab('requests'))}
                     className="px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-300 hover:bg-amber-500 hover:text-slate-950 border border-amber-500/35 text-xs font-bold whitespace-nowrap shrink-0 transition cursor-pointer"
                   >
-                    Process
+                    Complete &amp; Proof
                   </button>
                 </div>
               ))}

@@ -63,7 +63,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const pendingRequestsCount =
     deposits.filter(d => d.status === 'pending').length +
-    withdrawals.filter(w => w.status === 'pending').length;
+    withdrawals.filter(w => w.status === 'pending' || w.status === 'processing').length;
   const unreadIdChatsCount = idChats.filter(c => c.unreadByAdmin).length;
 
   const handleOpenAdminSecurity = () => {
@@ -373,7 +373,7 @@ export const Header: React.FC<HeaderProps> = ({
                 { id: 'coins', label: 'Coins' },
                 {
                   id: 'requests',
-                  label: pendingRequestsCount > 0 ? `Requests (${pendingRequestsCount})` : 'Requests'
+                  label: pendingRequestsCount > 0 ? `Deposits/Withdraw (${pendingRequestsCount})` : 'Deposits/Withdraw'
                 },
                 {
                   id: 'id_chats',

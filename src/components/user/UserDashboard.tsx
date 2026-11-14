@@ -28,6 +28,10 @@ import {
   MessageSquarePlus
 } from 'lucide-react';
 import { WhatsAppSupportButton } from '../common/WhatsAppSupportButton';
+import {
+  isMarketBettingOpen,
+  formatCountdownToClose
+} from '../../utils/marketTiming';
 
 interface UserDashboardProps {
   onSelectPrediction: (pred: Prediction, choice: 'YES' | 'NO') => void;
@@ -50,12 +54,12 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   onOpenIdChat,
   hasUnreadChat
 }) => {
-  const { currentUser, bets, transactions, predictions, withdrawals } = useApp();
+  const { currentUser, bets, transactions, predictions, withdrawals, nowMs } = useApp();
   const [marketFilter, setMarketFilter] = useState<SpotlightFilter>('All');
   const [heroSlide, setHeroSlide] = useState<'cricket' | 'movies'>('cricket');
   const [heroImgError, setHeroImgError] = useState<Record<string, boolean>>({});
 
-  const allOpenMarkets = predictions.filter(p => p.status === 'open');
+  const allOpenMarkets = predictions.filter(p => isMarketBettingOpen(p, nowMs));
 
   const spotlightMarkets = useMemo(() => {
     if (marketFilter === 'Cricket') {
@@ -575,10 +579,15 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                             <span className="truncate">{pred.subtitle || pred.category}</span>
                           </span>
 
-                          <span className="font-mono-numbers text-[10px] text-slate-400 shrink-0">
-                            {closeDate.toLocaleDateString([], { month: 'short', day: 'numeric' })},{' '}
-                            {closeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
+                          <div className="text-right shrink-0">
+                            <div className="font-mono-numbers text-[10px] text-slate-400">
+                              {closeDate.toLocaleDateString([], { month: 'short', day: 'numeric' })},{' '}
+                              {closeDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                            <div className="font-mono-numbers text-[10px] text-[#14e071] font-semibold">
+                              {formatCountdownToClose(pred.closingTime, nowMs)}
+                            </div>
+                          </div>
                         </div>
 
                         <h3 className="font-bold text-sm text-white group-hover:text-[#14e071] transition leading-snug">

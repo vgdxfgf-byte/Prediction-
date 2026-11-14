@@ -25,7 +25,11 @@ import { AdminDashboard } from './components/admin/AdminDashboard';
 import { AdminUserManagement } from './components/admin/AdminUserManagement';
 import { AdminCoinManagement } from './components/admin/AdminCoinManagement';
 import { AdminPredictions } from './components/admin/AdminPredictions';
-import { AdminRequests } from './components/admin/AdminRequests';
+import {
+  AdminRequests,
+  type AdminRequestsSubTab,
+  type AdminRequestsStatusFilter
+} from './components/admin/AdminRequests';
 import { AdminAuditLogs } from './components/admin/AdminAuditLogs';
 import { AdminIdChats } from './components/admin/AdminIdChats';
 
@@ -94,10 +98,12 @@ const MainAppContent: React.FC = () => {
   const [adminCreateUserOpen, setAdminCreateUserOpen] = useState<boolean>(false);
   const [adminCreatePredOpen, setAdminCreatePredOpen] = useState<boolean>(false);
   const [adminPreselectedUserId, setAdminPreselectedUserId] = useState<string | undefined>(undefined);
+  const [adminRequestsInitialTab, setAdminRequestsInitialTab] = useState<AdminRequestsSubTab | undefined>(undefined);
+  const [adminRequestsInitialStatus, setAdminRequestsInitialStatus] = useState<AdminRequestsStatusFilter | undefined>(undefined);
 
   const pendingRequestsCount =
     deposits.filter(d => d.status === 'pending').length +
-    withdrawals.filter(w => w.status === 'pending').length;
+    withdrawals.filter(w => w.status === 'pending' || w.status === 'processing').length;
   const unreadIdChatsCount = idChats.filter(c => c.unreadByAdmin).length;
 
   if (isHydrating) {
@@ -154,7 +160,7 @@ const MainAppContent: React.FC = () => {
       { id: 'coins', label: 'Coins', icon: Coins },
       {
         id: 'requests',
-        label: 'Requests',
+        label: 'Deposit & Withdrawals',
         icon: ArrowDownUp,
         badge: pendingRequestsCount
       },
@@ -248,6 +254,11 @@ const MainAppContent: React.FC = () => {
                       setAdminCreatePredOpen(true);
                     }}
                     onOpenPaymentGateway={() => setAdminTab('gateway')}
+                    onOpenRequests={(subTab, status) => {
+                      setAdminRequestsInitialTab(subTab);
+                      setAdminRequestsInitialStatus(status);
+                      setAdminTab('requests');
+                    }}
                   />
                 )}
 
@@ -273,7 +284,17 @@ const MainAppContent: React.FC = () => {
                   />
                 )}
 
-                {adminTab === 'requests' && <AdminRequests key="requests" />}
+                {adminTab === 'requests' && (
+                  <AdminRequests
+                    key="requests"
+                    initialTab={adminRequestsInitialTab}
+                    initialStatusFilter={adminRequestsInitialStatus}
+                    onClearInitialTab={() => {
+                      setAdminRequestsInitialTab(undefined);
+                      setAdminRequestsInitialStatus(undefined);
+                    }}
+                  />
+                )}
 
                 {adminTab === 'id_chats' && <AdminIdChats />}
 
