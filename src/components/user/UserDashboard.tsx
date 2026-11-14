@@ -85,6 +85,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   // Compute metrics for current user
   const userBets = bets.filter(b => b.userId === currentUser.id);
   const activeBets = userBets.filter(b => b.result === 'pending');
+  const settledBets = userBets.filter(b => b.result !== 'pending');
   const wonBets = userBets.filter(b => b.result === 'won');
   const lostBets = userBets.filter(b => b.result === 'lost');
 
@@ -98,6 +99,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   const pendingWithdrawalsAmount = pendingWithdrawals.reduce((sum, w) => sum + w.amount, 0);
 
   const userTransactions = transactions.filter(t => t.userId === currentUser.id).slice(0, 5);
+  const predictionById = new Map(predictions.map(p => [p.id, p]));
   const initials = currentUser.username.substring(0, 2).toUpperCase();
 
   const kpiCards = [
@@ -149,16 +151,16 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     },
     {
       id: 'predictions',
-      label: 'My Predictions',
-      sub: `${userBets.length} slips`,
+      label: 'Bet Results',
+      sub: `${settledBets.length} settled · ${activeBets.length} live`,
       icon: Trophy,
       featured: false,
       onClick: () => onNavigateTab('history')
     },
     {
       id: 'wallet',
-      label: 'Wallet',
-      sub: 'Coins & UPI',
+      label: 'Wallet & History',
+      sub: `${transactions.filter(t => t.userId === currentUser.id).length} txns`,
       icon: Wallet,
       featured: false,
       onClick: () => onNavigateTab('wallet')
@@ -694,7 +696,80 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             )}
           </motion.div>
 
-          {/* Recent Ledger */}
+          {/* Recent Bet Results */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.24, delay: 0.11 }}
+            className="apex-card rounded-2xl p-4 space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-[#14e071]" />
+                Bet Results ({settledBets.length})
+              </h3>
+              <button
+                onClick={() => onNavigateTab('history')}
+                className="text-[11px] font-semibold text-[#14e071] hover:text-emerald-300 transition cursor-pointer"
+              >
+                All Results →
+              </button>
+            </div>
+
+            {settledBets.length === 0 ? (
+              <div className="py-5 text-center text-slate-400 text-xs">
+                No settled bet results yet. Results appear here as soon as admin settles a market.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {settledBets.slice(0, 3).map((b, idx) => {
+                  const isWon = b.result === 'won';
+                  const isVoided = b.result === 'voided';
+                  const outcome = predictionById.get(b.predictionId)?.outcome;
+                  return (
+                    <motion.div
+                      key={b.id}
+                      initial={{ opacity: 0, x: 8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.18, delay: idx * 0.04 }}
+                      className="p-3 rounded-xl bg-[#070c10] border border-white/[0.06] text-xs space-y-1"
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="font-medium text-slate-200 line-clamp-1 text-[11px]">
+                          {b.predictionTitle}
+                        </span>
+                        <span
+                          className={`font-bold font-mono-numbers text-[11px] shrink-0 ${
+                            isWon
+                              ? 'text-[#14e071]'
+                              : isVoided
+                                ? 'text-slate-300'
+                                : 'text-rose-400'
+                          }`}
+                        >
+                          {isWon
+                            ? `WON +${b.actualWinnings.toLocaleString()}`
+                            : isVoided
+                              ? `REFUND +${b.actualWinnings.toLocaleString()}`
+                              : `LOST -${b.amount.toLocaleString()}`}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono-numbers">
+                        <span>
+                          Pick: {b.choice} @ {b.odds}x
+                          {outcome ? ` · Result: ${outcome}` : ''}
+                        </span>
+                        <span>Stake: {b.amount.toLocaleString()}</span>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+          </motion.div>
+
+          {/* Recent Transaction History */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -704,13 +779,13 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-sm text-white flex items-center gap-2">
                 <Coins className="w-4 h-4 text-amber-400" />
-                Recent Activities
+                Transaction History
               </h3>
               <button
                 onClick={() => onNavigateTab('wallet')}
                 className="text-[11px] font-semibold text-[#14e071] hover:text-emerald-300 transition cursor-pointer"
               >
-                Wallet →
+                Full Ledger →
               </button>
             </div>
 
@@ -722,6 +797,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               <div className="space-y-2">
                 {userTransactions.map((tx, idx) => {
                   const isPositive = tx.amount > 0;
+                  const isNeutral = tx.amount === 0;
                   return (
                     <motion.div
                       key={tx.id}
@@ -735,7 +811,9 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                           className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
                             isPositive
                               ? 'bg-emerald-500/15 text-[#14e071]'
-                              : 'bg-rose-500/15 text-rose-400'
+                              : isNeutral
+                                ? 'bg-white/[0.06] text-slate-400'
+                                : 'bg-rose-500/15 text-rose-400'
                           }`}
                         >
                           {isPositive ? (
@@ -748,24 +826,35 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                           <div className="text-[11px] font-semibold text-slate-200 truncate">
                             {tx.description}
                           </div>
-                          <div className="text-[10px] text-slate-500">
-                            {new Date(tx.createdAt).toLocaleDateString([], {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
+                          <div className="text-[10px] text-slate-500 flex items-center gap-1.5">
+                            <span className="uppercase">{tx.type.replace('_', ' ')}</span>
+                            <span>·</span>
+                            <span>
+                              {new Date(tx.createdAt).toLocaleDateString([], {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </span>
                           </div>
                         </div>
                       </div>
 
-                      <div
-                        className={`font-mono-numbers font-bold text-xs shrink-0 pl-2 ${
-                          isPositive ? 'text-[#14e071]' : 'text-rose-400'
-                        }`}
-                      >
-                        {isPositive ? '+' : ''}
-                        {tx.amount.toLocaleString()}
+                      <div className="text-right shrink-0 pl-2">
+                        <div
+                          className={`font-mono-numbers font-bold text-xs ${
+                            isPositive
+                              ? 'text-[#14e071]'
+                              : isNeutral
+                                ? 'text-slate-400'
+                                : 'text-rose-400'
+                          }`}
+                        >
+                          {isPositive ? '+' : ''}
+                          {tx.amount.toLocaleString()}
+                        </div>
+                        <div className="text-[9px] uppercase text-slate-500">{tx.status}</div>
                       </div>
                     </motion.div>
                   );

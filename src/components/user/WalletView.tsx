@@ -15,7 +15,8 @@ import {
   ShieldCheck,
   Building,
   Smartphone,
-  Wallet as WalletIcon
+  Wallet as WalletIcon,
+  Search
 } from 'lucide-react';
 
 interface WalletViewProps {
@@ -27,6 +28,8 @@ export const WalletView: React.FC<WalletViewProps> = ({ initialModal, onClearIni
   const { currentUser, transactions, deposits, withdrawals, requestDeposit, requestWithdrawal, getEffectivePaymentGateway } = useApp();
 
   const [activeTab, setActiveTab] = useState<'transactions' | 'deposits' | 'withdrawals'>('transactions');
+  const [txTypeFilter, setTxTypeFilter] = useState<'all' | 'wins' | 'bets' | 'deposits' | 'withdrawals' | 'admin'>('all');
+  const [txSearch, setTxSearch] = useState<string>('');
   const [showDepositModal, setShowDepositModal] = useState<boolean>(initialModal === 'deposit');
   const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(initialModal === 'withdraw');
 
@@ -50,6 +53,21 @@ export const WalletView: React.FC<WalletViewProps> = ({ initialModal, onClearIni
   if (!currentUser) return null;
 
   const userTransactions = transactions.filter(t => t.userId === currentUser.id);
+  const filteredTransactions = userTransactions.filter(tx => {
+    if (txTypeFilter === 'wins' && tx.type !== 'bet_won' && tx.type !== 'bet_refund') return false;
+    if (txTypeFilter === 'bets' && tx.type !== 'bet_placed') return false;
+    if (txTypeFilter === 'deposits' && tx.type !== 'deposit') return false;
+    if (txTypeFilter === 'withdrawals' && tx.type !== 'withdrawal') return false;
+    if (txTypeFilter === 'admin' && tx.type !== 'admin_credit' && tx.type !== 'admin_debit') return false;
+    if (txSearch.trim()) {
+      const q = txSearch.toLowerCase();
+      const matchDesc = tx.description.toLowerCase().includes(q);
+      const matchType = tx.type.replace('_', ' ').toLowerCase().includes(q);
+      const matchRef = (tx.referenceId || tx.id).toLowerCase().includes(q);
+      if (!matchDesc && !matchType && !matchRef) return false;
+    }
+    return true;
+  });
   const userDeposits = deposits.filter(d => d.userId === currentUser.id);
   const userWithdrawals = withdrawals.filter(w => w.userId === currentUser.id);
   const effectiveGateway = getEffectivePaymentGateway(currentUser.id);
@@ -177,13 +195,13 @@ export const WalletView: React.FC<WalletViewProps> = ({ initialModal, onClearIni
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveTab('transactions')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition ${
+            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition cursor-pointer ${
               activeTab === 'transactions'
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                ? 'bg-[#14e071] text-[#04130b] font-bold shadow-[0_6px_18px_-6px_rgba(20,224,113,0.65)]'
+                : 'bg-[#0d151b] text-slate-400 hover:text-white border border-white/[0.08]'
             }`}
           >
-            All Ledger ({userTransactions.length})
+            Transaction History ({userTransactions.length})
           </button>
           <button
             onClick={() => setActiveTab('deposits')}
@@ -208,71 +226,234 @@ export const WalletView: React.FC<WalletViewProps> = ({ initialModal, onClearIni
         </div>
       </div>
 
-      {/* Tab 1: All Ledger Transactions */}
+      {/* Tab 1: Complete Transaction History */}
       {activeTab === 'transactions' && (
-        <div className="space-y-3">
-          {userTransactions.length === 0 ? (
-            <div className="bg-slate-900/60 p-10 rounded-2xl border border-slate-800 text-center text-slate-500 text-xs">
-              No transactions on record yet.
+        <div className="space-y-4">
+          {/* Filter Chips & Search */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+              {(
+                [
+                  { id: 'all', label: 'All' },
+                  { id: 'wins', label: 'Wins & Refunds' },
+                  { id: 'bets', label: 'Bets Placed' },
+                  { id: 'deposits', label: 'Deposits' },
+                  { id: 'withdrawals', label: 'Withdrawals' },
+                  { id: 'admin', label: 'Admin' }
+                ] as const
+              ).map(f => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setTxTypeFilter(f.id)}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold whitespace-nowrap shrink-0 transition cursor-pointer ${
+                    txTypeFilter === f.id
+                      ? 'bg-emerald-500/20 text-[#14e071] border border-[#14e071]/40'
+                      : 'bg-[#0d151b] text-slate-400 hover:text-white border border-white/[0.07]'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="relative w-full sm:w-64">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={txSearch}
+                onChange={e => setTxSearch(e.target.value)}
+                placeholder="Search transactions or ref ID..."
+                className="w-full pl-8 pr-3 py-1.5 bg-[#0d151b] border border-white/[0.08] rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#14e071]"
+              />
+            </div>
+          </div>
+
+          {filteredTransactions.length === 0 ? (
+            <div className="apex-card p-10 rounded-2xl text-center text-slate-400 text-xs">
+              {userTransactions.length === 0
+                ? 'No transactions on record yet.'
+                : 'No transactions match your current filter.'}
             </div>
           ) : (
-            <div className="bg-slate-900/90 rounded-2xl border border-slate-800 overflow-hidden shadow-md">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-950/80 text-slate-400 uppercase font-semibold border-b border-slate-800">
-                    <tr>
-                      <th className="px-4 py-3">Type</th>
-                      <th className="px-4 py-3">Description</th>
-                      <th className="px-4 py-3">Amount</th>
-                      <th className="px-4 py-3">Balance After</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/80 text-slate-300">
-                    {userTransactions.map(tx => {
-                      const isPositive = tx.amount > 0;
-                      return (
-                        <tr key={tx.id} className="hover:bg-slate-800/40 transition">
-                          <td className="px-4 py-3 font-semibold">
-                            <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
-                              tx.type === 'deposit' ? 'bg-emerald-500/20 text-emerald-400' :
-                              tx.type === 'bet_won' ? 'bg-amber-500/20 text-amber-400' :
-                              tx.type === 'admin_credit' ? 'bg-teal-500/20 text-teal-300' :
-                              tx.type === 'withdrawal' ? 'bg-purple-500/20 text-purple-300' :
-                              tx.type === 'bet_placed' ? 'bg-slate-700 text-slate-300' : 'bg-rose-500/20 text-rose-400'
-                            }`}>
-                              {tx.type.replace('_', ' ')}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 max-w-xs truncate text-slate-200">
-                            {tx.description}
-                          </td>
-                          <td className={`px-4 py-3 font-mono font-bold ${isPositive ? 'text-emerald-400' : 'text-slate-300'}`}>
-                            {isPositive ? '+' : ''}{tx.amount.toLocaleString()} 🪙
-                          </td>
-                          <td className="px-4 py-3 font-mono text-slate-400">
-                            {tx.balanceAfter.toLocaleString()} 🪙
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              tx.status === 'completed' ? 'bg-emerald-500/10 text-emerald-400' :
-                              tx.status === 'pending' ? 'bg-amber-500/10 text-amber-400' :
-                              'bg-rose-500/10 text-rose-400'
-                            }`}>
-                              {tx.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
-                            {new Date(tx.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <>
+              {/* Mobile Cards */}
+              <div className="space-y-2.5 md:hidden">
+                {filteredTransactions.map(tx => {
+                  const isPositive = tx.amount > 0;
+                  const isNeutral = tx.amount === 0;
+                  return (
+                    <div
+                      key={tx.id}
+                      className="apex-card rounded-xl p-3.5 space-y-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
+                            tx.type === 'deposit'
+                              ? 'bg-emerald-500/20 text-[#14e071]'
+                              : tx.type === 'bet_won'
+                                ? 'bg-amber-500/20 text-amber-300'
+                                : tx.type === 'bet_refund'
+                                  ? 'bg-sky-500/20 text-sky-300'
+                                  : tx.type === 'admin_credit'
+                                    ? 'bg-teal-500/20 text-teal-300'
+                                    : tx.type === 'withdrawal'
+                                      ? 'bg-purple-500/20 text-purple-300'
+                                      : tx.type === 'bet_placed'
+                                        ? 'bg-white/[0.08] text-slate-300'
+                                        : 'bg-rose-500/20 text-rose-400'
+                          }`}
+                        >
+                          {tx.type.replace('_', ' ')}
+                        </span>
+                        <span
+                          className={`font-mono-numbers font-black text-sm ${
+                            isPositive
+                              ? 'text-[#14e071]'
+                              : isNeutral
+                                ? 'text-slate-400'
+                                : 'text-rose-400'
+                          }`}
+                        >
+                          {isPositive ? '+' : ''}
+                          {tx.amount.toLocaleString()} coins
+                        </span>
+                      </div>
+
+                      <div className="text-slate-100 font-medium">{tx.description}</div>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-white/[0.06]">
+                        <span className="font-mono-numbers">
+                          Bal: {tx.balanceBefore.toLocaleString()} →{' '}
+                          <strong className="text-white">{tx.balanceAfter.toLocaleString()}</strong>
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            tx.status === 'completed'
+                              ? 'bg-emerald-500/15 text-[#14e071]'
+                              : tx.status === 'pending' || tx.status === 'processing'
+                                ? 'bg-amber-500/15 text-amber-300'
+                                : 'bg-rose-500/15 text-rose-400'
+                          }`}
+                        >
+                          {tx.status}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-500">
+                        <span className="font-mono-numbers truncate max-w-[60%]">
+                          Ref: {tx.referenceId || tx.id}
+                        </span>
+                        <span>
+                          {new Date(tx.createdAt).toLocaleDateString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+
+              {/* Desktop Table */}
+              <div className="hidden md:block apex-card rounded-2xl overflow-hidden shadow-md">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#070c10] text-slate-400 uppercase font-semibold border-b border-white/[0.08]">
+                      <tr>
+                        <th className="px-4 py-3">Type</th>
+                        <th className="px-4 py-3">Description &amp; Ref</th>
+                        <th className="px-4 py-3">Amount</th>
+                        <th className="px-4 py-3">Balance Flow</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.06] text-slate-300">
+                      {filteredTransactions.map(tx => {
+                        const isPositive = tx.amount > 0;
+                        const isNeutral = tx.amount === 0;
+                        return (
+                          <tr key={tx.id} className="hover:bg-white/[0.03] transition">
+                            <td className="px-4 py-3 font-semibold whitespace-nowrap">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
+                                  tx.type === 'deposit'
+                                    ? 'bg-emerald-500/20 text-[#14e071]'
+                                    : tx.type === 'bet_won'
+                                      ? 'bg-amber-500/20 text-amber-300'
+                                      : tx.type === 'bet_refund'
+                                        ? 'bg-sky-500/20 text-sky-300'
+                                        : tx.type === 'admin_credit'
+                                          ? 'bg-teal-500/20 text-teal-300'
+                                          : tx.type === 'withdrawal'
+                                            ? 'bg-purple-500/20 text-purple-300'
+                                            : tx.type === 'bet_placed'
+                                              ? 'bg-white/[0.08] text-slate-300'
+                                              : 'bg-rose-500/20 text-rose-400'
+                                }`}
+                              >
+                                {tx.type.replace('_', ' ')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 max-w-sm">
+                              <div className="text-slate-100 font-medium truncate" title={tx.description}>
+                                {tx.description}
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-mono-numbers truncate">
+                                Ref: {tx.referenceId || tx.id}
+                              </div>
+                            </td>
+                            <td
+                              className={`px-4 py-3 font-mono-numbers font-bold whitespace-nowrap ${
+                                isPositive
+                                  ? 'text-[#14e071]'
+                                  : isNeutral
+                                    ? 'text-slate-400'
+                                    : 'text-rose-400'
+                              }`}
+                            >
+                              {isPositive ? '+' : ''}
+                              {tx.amount.toLocaleString()} coins
+                            </td>
+                            <td className="px-4 py-3 font-mono-numbers text-slate-400 whitespace-nowrap">
+                              {tx.balanceBefore.toLocaleString()} →{' '}
+                              <span className="text-slate-200 font-semibold">
+                                {tx.balanceAfter.toLocaleString()}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  tx.status === 'completed'
+                                    ? 'bg-emerald-500/15 text-[#14e071]'
+                                    : tx.status === 'pending' || tx.status === 'processing'
+                                      ? 'bg-amber-500/15 text-amber-300'
+                                      : 'bg-rose-500/15 text-rose-400'
+                                }`}
+                              >
+                                {tx.status}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-400 whitespace-nowrap font-mono-numbers text-[11px]">
+                              {new Date(tx.createdAt).toLocaleDateString([], {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}

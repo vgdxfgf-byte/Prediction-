@@ -35,6 +35,7 @@ export interface User {
   createdAt: string;
   lastLogin?: string;
   notes?: string;
+  ownerUid?: string;
   customPaymentGateway?: PaymentGatewayConfig | null;
 }
 
@@ -84,6 +85,7 @@ export interface Bet {
   createdAt: string;
   settledAt?: string;
   transactionId: string;
+  ownerUid?: string;
 }
 
 export type TransactionType = 
@@ -125,6 +127,7 @@ export interface DepositRequest {
   reviewedAt?: string;
   reviewedBy?: string;
   adminRemark?: string;
+  ownerUid?: string;
 }
 
 export interface WithdrawalRequest {
@@ -139,6 +142,7 @@ export interface WithdrawalRequest {
   reviewedAt?: string;
   reviewedBy?: string;
   adminRemark?: string;
+  ownerUid?: string;
 }
 
 export interface CoinAdjustmentLog {

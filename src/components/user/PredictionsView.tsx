@@ -225,17 +225,32 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
                 </div>
 
                 {userExistingBets.length > 0 && (
-                  <div className="my-3 px-3 py-2 rounded-xl bg-[#070c10] border border-white/[0.06] text-xs flex items-center justify-between">
+                  <div className="my-3 px-3 py-2 rounded-xl bg-[#070c10] border border-white/[0.06] text-xs flex flex-wrap items-center justify-between gap-1.5">
                     <span className="text-slate-400">Your Pick:</span>
-                    <div className="flex items-center gap-1.5 font-mono-numbers">
+                    <div className="flex flex-wrap items-center gap-2 font-mono-numbers">
                       {userExistingBets.map(b => (
                         <span
                           key={b.id}
                           className={`font-bold text-[11px] ${
-                            b.choice === 'YES' ? 'text-[#14e071]' : 'text-rose-400'
+                            b.result === 'won'
+                              ? 'text-[#14e071]'
+                              : b.result === 'lost'
+                                ? 'text-rose-400'
+                                : b.result === 'voided'
+                                  ? 'text-slate-300'
+                                  : b.choice === 'YES'
+                                    ? 'text-[#14e071]'
+                                    : 'text-rose-400'
                           }`}
                         >
                           {b.choice} ({b.amount})
+                          {b.result === 'won'
+                            ? ` · Won +${b.actualWinnings}`
+                            : b.result === 'lost'
+                              ? ' · Lost'
+                              : b.result === 'voided'
+                                ? ' · Refunded'
+                                : ''}
                         </span>
                       ))}
                     </div>

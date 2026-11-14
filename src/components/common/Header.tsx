@@ -188,8 +188,8 @@ export const Header: React.FC<HeaderProps> = ({
                 {[
                   { id: 'dashboard', label: 'Dashboard' },
                   { id: 'predictions', label: 'Markets' },
-                  { id: 'history', label: 'My Predictions' },
-                  { id: 'wallet', label: 'Wallet' }
+                  { id: 'history', label: 'Bet Results' },
+                  { id: 'wallet', label: 'Wallet & History' }
                 ].map(item => (
                   <button
                     key={item.id}
@@ -299,7 +299,7 @@ export const Header: React.FC<HeaderProps> = ({
                             className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-2 cursor-pointer"
                           >
                             <ArrowDownUp className="w-4 h-4 text-slate-400" />
-                            My Predictions
+                            Bet Results &amp; History
                           </button>
                           <button
                             onClick={() => {
@@ -309,7 +309,7 @@ export const Header: React.FC<HeaderProps> = ({
                             className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/[0.05] rounded-lg flex items-center gap-2 cursor-pointer"
                           >
                             <Coins className="w-4 h-4 text-amber-400" />
-                            Wallet & Withdraw
+                            Wallet &amp; Transactions
                           </button>
                           <button
                             onClick={() => {

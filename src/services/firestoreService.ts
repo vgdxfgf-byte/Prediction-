@@ -85,6 +85,7 @@ function mapUserDoc(id: string, data: Record<string, unknown>): User {
     createdAt: toIso(data.createdAt),
     lastLogin: data.lastLogin ? String(data.lastLogin) : undefined,
     notes: data.notes ? String(data.notes) : undefined,
+    ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
     customPaymentGateway: (data.customPaymentGateway as PaymentGatewayConfig | null | undefined) ?? null
   };
 }
@@ -129,7 +130,8 @@ function mapBetDoc(id: string, data: Record<string, unknown>): Bet {
     result: (data.result as Bet['result']) || 'pending',
     createdAt: toIso(data.createdAt),
     settledAt: data.settledAt ? String(data.settledAt) : undefined,
-    transactionId: String(data.transactionId || '')
+    transactionId: String(data.transactionId || ''),
+    ownerUid: data.ownerUid ? String(data.ownerUid) : undefined
   };
 }
 
@@ -162,7 +164,8 @@ function mapDepositDoc(id: string, data: Record<string, unknown>): DepositReques
     createdAt: toIso(data.createdAt),
     reviewedAt: data.reviewedAt ? String(data.reviewedAt) : undefined,
     reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
-    adminRemark: data.adminRemark ? String(data.adminRemark) : undefined
+    adminRemark: data.adminRemark ? String(data.adminRemark) : undefined,
+    ownerUid: data.ownerUid ? String(data.ownerUid) : undefined
   };
 }
 
@@ -178,7 +181,8 @@ function mapWithdrawalDoc(id: string, data: Record<string, unknown>): Withdrawal
     createdAt: toIso(data.createdAt),
     reviewedAt: data.reviewedAt ? String(data.reviewedAt) : undefined,
     reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
-    adminRemark: data.adminRemark ? String(data.adminRemark) : undefined
+    adminRemark: data.adminRemark ? String(data.adminRemark) : undefined,
+    ownerUid: data.ownerUid ? String(data.ownerUid) : undefined
   };
 }
 
@@ -1225,6 +1229,44 @@ export async function fsDeleteUser(user: User): Promise<{ success: boolean; erro
   }
 }
 
+let txSequence = 0;
+function createUniqueTxId(prefix = 'tx'): string {
+  txSequence = (txSequence + 1) % 10000;
+  return `${prefix}_${Date.now()}_${txSequence}_${Math.floor(Math.random() * 1000)}`;
+}
+
+async function resolveUserOwnerUid(userId: string, knownOwnerUid?: string): Promise<string | null> {
+  if (knownOwnerUid && /^[a-zA-Z0-9_-]{1,128}$/.test(knownOwnerUid)) {
+    return knownOwnerUid;
+  }
+  try {
+    const snap = await getDoc(doc(db, 'users', userId));
+    const uid = snap.exists() ? String(snap.data().ownerUid || '') : '';
+    return uid && /^[a-zA-Z0-9_-]{1,128}$/.test(uid) ? uid : null;
+  } catch {
+    return null;
+  }
+}
+
+type BatchWriteOp =
+  | { kind: 'set'; ref: ReturnType<typeof doc>; data: Record<string, unknown> }
+  | { kind: 'update'; ref: ReturnType<typeof doc>; data: Record<string, unknown> }
+  | { kind: 'delete'; ref: ReturnType<typeof doc> };
+
+async function commitChunkedOps(ops: BatchWriteOp[]): Promise<void> {
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    const chunk = ops.slice(i, i + CHUNK_SIZE);
+    for (const op of chunk) {
+      if (op.kind === 'set') batch.set(op.ref, op.data);
+      else if (op.kind === 'update') batch.update(op.ref, op.data);
+      else batch.delete(op.ref);
+    }
+    await batch.commit();
+  }
+}
+
 export async function fsAdjustUserCoins(
   adminUser: User,
   targetUser: User,
@@ -1239,7 +1281,10 @@ export async function fsAdjustUserCoins(
   else if (type === 'debit') next = Math.max(0, prev - amt);
   else next = amt;
 
-  const logId = `clog_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const logId = createUniqueTxId('clog');
+  const cleanReason = (reason.trim() || 'Admin adjustment').slice(0, 300);
+  const ownerUid = await resolveUserOwnerUid(targetUser.id, targetUser.ownerUid);
+
   const batch = writeBatch(db);
 
   batch.update(doc(db, 'users', targetUser.id), {
@@ -1257,9 +1302,29 @@ export async function fsAdjustUserCoins(
     amount: amt,
     previousBalance: prev,
     newBalance: next,
-    reason: (reason.trim() || 'Admin adjustment').slice(0, 300),
+    reason: cleanReason,
     createdAt: serverTimestamp()
   });
+
+  if (ownerUid && next !== prev) {
+    const txId = createUniqueTxId('tx');
+    const diff = next - prev;
+    batch.set(doc(db, 'transactions', txId), {
+      id: txId,
+      userId: targetUser.id,
+      ownerUid,
+      username: targetUser.username,
+      type: diff >= 0 ? 'admin_credit' : 'admin_debit',
+      amount: diff,
+      balanceBefore: prev,
+      balanceAfter: next,
+      status: 'completed',
+      description: cleanReason,
+      referenceId: logId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  }
 
   try {
     await batch.commit();
@@ -1343,20 +1408,55 @@ export async function fsDeletePrediction(
   let refundedCount = 0;
   let refundedTotal = 0;
   const userCoins = new Map<string, number>(users.map(u => [u.id, u.coins]));
+  const userOwnerUids = new Map<string, string>();
+  for (const u of users) {
+    if (u.ownerUid) userOwnerUids.set(u.id, u.ownerUid);
+  }
+  for (const b of pendingBets) {
+    if (b.ownerUid && !userOwnerUids.has(b.userId)) userOwnerUids.set(b.userId, b.ownerUid);
+  }
 
-  const batch = writeBatch(db);
-  batch.delete(doc(db, 'predictions', id));
+  const ops: BatchWriteOp[] = [{ kind: 'delete', ref: doc(db, 'predictions', id) }];
+  const nowIso = new Date().toISOString();
 
   for (const bet of pendingBets) {
-    batch.update(doc(db, 'bets', bet.id), {
-      result: 'voided',
-      actualWinnings: bet.amount,
-      settledAt: new Date().toISOString(),
-      updatedAt: serverTimestamp()
+    ops.push({
+      kind: 'update',
+      ref: doc(db, 'bets', bet.id),
+      data: {
+        result: 'voided',
+        actualWinnings: bet.amount,
+        settledAt: nowIso,
+        updatedAt: serverTimestamp()
+      }
     });
     const cur = userCoins.get(bet.userId);
+    const ownerUid = userOwnerUids.get(bet.userId) || (await resolveUserOwnerUid(bet.userId, bet.ownerUid));
     if (cur !== undefined) {
-      userCoins.set(bet.userId, cur + bet.amount);
+      const nextBal = cur + bet.amount;
+      userCoins.set(bet.userId, nextBal);
+      if (ownerUid) {
+        const txId = createUniqueTxId('tx');
+        ops.push({
+          kind: 'set',
+          ref: doc(db, 'transactions', txId),
+          data: {
+            id: txId,
+            userId: bet.userId,
+            ownerUid,
+            username: bet.username,
+            type: 'bet_refund',
+            amount: bet.amount,
+            balanceBefore: cur,
+            balanceAfter: nextBal,
+            status: 'completed',
+            description: `Market removed refund: "${bet.predictionTitle.slice(0, 60)}"`.slice(0, 300),
+            referenceId: bet.id,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }
+        });
+      }
     }
     refundedCount += 1;
     refundedTotal += bet.amount;
@@ -1365,12 +1465,16 @@ export async function fsDeletePrediction(
   for (const [uid, nextCoins] of userCoins.entries()) {
     const orig = users.find(u => u.id === uid);
     if (orig && orig.coins !== nextCoins) {
-      batch.update(doc(db, 'users', uid), { coins: nextCoins, updatedAt: serverTimestamp() });
+      ops.push({
+        kind: 'update',
+        ref: doc(db, 'users', uid),
+        data: { coins: nextCoins, updatedAt: serverTimestamp() }
+      });
     }
   }
 
   try {
-    await batch.commit();
+    await commitChunkedOps(ops);
     return { success: true, refundedCount, refundedTotal };
   } catch (err) {
     handleFirestoreError(err, OperationType.DELETE, `predictions/${id}`);
@@ -1387,45 +1491,121 @@ export async function fsSettlePrediction(
   const nowIso = new Date().toISOString();
   const pendingBets = bets.filter(b => b.predictionId === predictionId && b.result === 'pending');
   const userCoins = new Map<string, number>(users.map(u => [u.id, u.coins]));
+  const userOwnerUids = new Map<string, string>();
+  for (const u of users) {
+    if (u.ownerUid) userOwnerUids.set(u.id, u.ownerUid);
+  }
+  for (const b of pendingBets) {
+    if (b.ownerUid && !userOwnerUids.has(b.userId)) userOwnerUids.set(b.userId, b.ownerUid);
+  }
+
   let winnersCount = 0;
   let totalPayout = 0;
 
-  const batch = writeBatch(db);
-  batch.update(doc(db, 'predictions', predictionId), {
-    status: 'settled',
-    outcome,
-    settledAt: nowIso,
-    settledBy: adminUsername.slice(0, 64),
-    updatedAt: serverTimestamp()
-  });
+  const ops: BatchWriteOp[] = [
+    {
+      kind: 'update',
+      ref: doc(db, 'predictions', predictionId),
+      data: {
+        status: 'settled',
+        outcome,
+        settledAt: nowIso,
+        settledBy: adminUsername.slice(0, 64),
+        updatedAt: serverTimestamp()
+      }
+    }
+  ];
 
   for (const bet of pendingBets) {
+    const cur = userCoins.get(bet.userId);
+    const ownerUid = userOwnerUids.get(bet.userId) || (await resolveUserOwnerUid(bet.userId, bet.ownerUid));
+
     if (outcome === 'VOID') {
-      batch.update(doc(db, 'bets', bet.id), {
-        result: 'voided',
-        actualWinnings: bet.amount,
-        settledAt: nowIso,
-        updatedAt: serverTimestamp()
+      ops.push({
+        kind: 'update',
+        ref: doc(db, 'bets', bet.id),
+        data: {
+          result: 'voided',
+          actualWinnings: bet.amount,
+          settledAt: nowIso,
+          updatedAt: serverTimestamp()
+        }
       });
-      const cur = userCoins.get(bet.userId);
-      if (cur !== undefined) userCoins.set(bet.userId, cur + bet.amount);
+      if (cur !== undefined) {
+        const nextBal = cur + bet.amount;
+        userCoins.set(bet.userId, nextBal);
+        if (ownerUid) {
+          const txId = createUniqueTxId('tx');
+          ops.push({
+            kind: 'set',
+            ref: doc(db, 'transactions', txId),
+            data: {
+              id: txId,
+              userId: bet.userId,
+              ownerUid,
+              username: bet.username,
+              type: 'bet_refund',
+              amount: bet.amount,
+              balanceBefore: cur,
+              balanceAfter: nextBal,
+              status: 'completed',
+              description: `Market voided refund: "${bet.predictionTitle.slice(0, 60)}"`.slice(0, 300),
+              referenceId: bet.id,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }
+          });
+        }
+      }
     } else if (bet.choice === outcome) {
-      batch.update(doc(db, 'bets', bet.id), {
-        result: 'won',
-        actualWinnings: bet.potentialWinnings,
-        settledAt: nowIso,
-        updatedAt: serverTimestamp()
+      ops.push({
+        kind: 'update',
+        ref: doc(db, 'bets', bet.id),
+        data: {
+          result: 'won',
+          actualWinnings: bet.potentialWinnings,
+          settledAt: nowIso,
+          updatedAt: serverTimestamp()
+        }
       });
-      const cur = userCoins.get(bet.userId);
-      if (cur !== undefined) userCoins.set(bet.userId, cur + bet.potentialWinnings);
+      if (cur !== undefined) {
+        const nextBal = cur + bet.potentialWinnings;
+        userCoins.set(bet.userId, nextBal);
+        if (ownerUid) {
+          const txId = createUniqueTxId('tx');
+          ops.push({
+            kind: 'set',
+            ref: doc(db, 'transactions', txId),
+            data: {
+              id: txId,
+              userId: bet.userId,
+              ownerUid,
+              username: bet.username,
+              type: 'bet_won',
+              amount: bet.potentialWinnings,
+              balanceBefore: cur,
+              balanceAfter: nextBal,
+              status: 'completed',
+              description: `Won "${bet.predictionTitle.slice(0, 55)}" (${bet.choice} @ ${bet.odds}x)`.slice(0, 300),
+              referenceId: bet.id,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }
+          });
+        }
+      }
       winnersCount += 1;
       totalPayout += bet.potentialWinnings;
     } else {
-      batch.update(doc(db, 'bets', bet.id), {
-        result: 'lost',
-        actualWinnings: 0,
-        settledAt: nowIso,
-        updatedAt: serverTimestamp()
+      ops.push({
+        kind: 'update',
+        ref: doc(db, 'bets', bet.id),
+        data: {
+          result: 'lost',
+          actualWinnings: 0,
+          settledAt: nowIso,
+          updatedAt: serverTimestamp()
+        }
       });
     }
   }
@@ -1433,12 +1613,16 @@ export async function fsSettlePrediction(
   for (const [uid, nextCoins] of userCoins.entries()) {
     const orig = users.find(u => u.id === uid);
     if (orig && orig.coins !== nextCoins) {
-      batch.update(doc(db, 'users', uid), { coins: nextCoins, updatedAt: serverTimestamp() });
+      ops.push({
+        kind: 'update',
+        ref: doc(db, 'users', uid),
+        data: { coins: nextCoins, updatedAt: serverTimestamp() }
+      });
     }
   }
 
   try {
-    await batch.commit();
+    await commitChunkedOps(ops);
     return { success: true, winnersCount, totalPayout };
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `predictions/${predictionId}`);
@@ -1453,6 +1637,8 @@ export async function fsReviewDeposit(
   adminRemark?: string
 ): Promise<{ success: boolean; error?: string }> {
   const status = action === 'approve' ? 'approved' : 'rejected';
+  const ownerUid = await resolveUserOwnerUid(deposit.userId, targetUser?.ownerUid || deposit.ownerUid);
+
   const batch = writeBatch(db);
   batch.update(doc(db, 'deposits', deposit.id), {
     status,
@@ -1463,8 +1649,45 @@ export async function fsReviewDeposit(
   });
 
   if (action === 'approve' && targetUser) {
+    const nextBalance = targetUser.coins + deposit.amount;
     batch.update(doc(db, 'users', targetUser.id), {
-      coins: targetUser.coins + deposit.amount,
+      coins: nextBalance,
+      updatedAt: serverTimestamp()
+    });
+    if (ownerUid) {
+      const txId = createUniqueTxId('tx');
+      batch.set(doc(db, 'transactions', txId), {
+        id: txId,
+        userId: targetUser.id,
+        ownerUid,
+        username: targetUser.username,
+        type: 'deposit',
+        amount: deposit.amount,
+        balanceBefore: targetUser.coins,
+        balanceAfter: nextBalance,
+        status: 'completed',
+        description: `Deposit approved (${deposit.paymentMethod} · Ref: ${deposit.referenceNumber})`.slice(0, 300),
+        referenceId: deposit.id,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+  } else if (action === 'reject' && targetUser && ownerUid) {
+    const txId = createUniqueTxId('tx');
+    const remarkNote = adminRemark?.trim() ? ` · ${adminRemark.trim()}` : '';
+    batch.set(doc(db, 'transactions', txId), {
+      id: txId,
+      userId: targetUser.id,
+      ownerUid,
+      username: targetUser.username,
+      type: 'deposit',
+      amount: 0,
+      balanceBefore: targetUser.coins,
+      balanceAfter: targetUser.coins,
+      status: 'rejected',
+      description: `Deposit rejected (${deposit.amount} coins · Ref: ${deposit.referenceNumber}${remarkNote})`.slice(0, 300),
+      referenceId: deposit.id,
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
   }
@@ -1485,6 +1708,22 @@ export async function fsReviewWithdrawal(
   adminRemark?: string
 ): Promise<{ success: boolean; error?: string }> {
   const status = action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'processing';
+  const txStatus = action === 'approve' ? 'completed' : action === 'reject' ? 'rejected' : 'processing';
+  const ownerUid = await resolveUserOwnerUid(withdrawal.userId, targetUser?.ownerUid || withdrawal.ownerUid);
+
+  // Locate original pending/processing withdrawal transaction so its status stays in sync
+  let existingTxDocs: { id: string }[] = [];
+  try {
+    const txSnap = await getDocs(
+      query(collection(db, 'transactions'), where('referenceId', '==', withdrawal.id), limit(5))
+    );
+    existingTxDocs = txSnap.docs
+      .filter(d => d.data().type === 'withdrawal' && Number(d.data().amount) < 0)
+      .map(d => ({ id: d.id }));
+  } catch {
+    // Proceed even if lookup finds nothing
+  }
+
   const batch = writeBatch(db);
   batch.update(doc(db, 'withdrawals', withdrawal.id), {
     status,
@@ -1494,11 +1733,38 @@ export async function fsReviewWithdrawal(
     updatedAt: serverTimestamp()
   });
 
-  if (action === 'reject' && targetUser) {
-    batch.update(doc(db, 'users', targetUser.id), {
-      coins: targetUser.coins + withdrawal.amount,
+  for (const txDoc of existingTxDocs) {
+    batch.update(doc(db, 'transactions', txDoc.id), {
+      status: txStatus,
       updatedAt: serverTimestamp()
     });
+  }
+
+  if (action === 'reject' && targetUser) {
+    const nextBalance = targetUser.coins + withdrawal.amount;
+    batch.update(doc(db, 'users', targetUser.id), {
+      coins: nextBalance,
+      updatedAt: serverTimestamp()
+    });
+    if (ownerUid) {
+      const txId = createUniqueTxId('tx');
+      const remarkNote = adminRemark?.trim() ? ` (${adminRemark.trim()})` : '';
+      batch.set(doc(db, 'transactions', txId), {
+        id: txId,
+        userId: targetUser.id,
+        ownerUid,
+        username: targetUser.username,
+        type: 'withdrawal',
+        amount: withdrawal.amount,
+        balanceBefore: targetUser.coins,
+        balanceAfter: nextBalance,
+        status: 'completed',
+        description: `Withdrawal rejected — coins refunded${remarkNote}`.slice(0, 300),
+        referenceId: withdrawal.id,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
   }
 
   try {
