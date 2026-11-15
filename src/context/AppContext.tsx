@@ -293,8 +293,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const cricketClientRef = useRef<CricketLiveClient | null>(null);
   const selectedMatchKeyRef = useRef<string | null>(null);
 
+  const clearPortalRecords = useCallback(() => {
+    setUsers([]);
+    setBets([]);
+    setParlayBets([]);
+    setTransactions([]);
+    setDeposits([]);
+    setWithdrawals([]);
+    setCoinLogs([]);
+    setIdChats([]);
+    setPortalDataError(null);
+  }, []);
+
   const setActivePortal = useCallback((portal: 'user' | 'admin') => {
-    setActivePortalState(portal);
+    setActivePortalState(prev => {
+      if (prev !== portal) {
+        clearPortalRecords();
+      }
+      return portal;
+    });
     safeSetStorage(STORAGE_KEYS.PORTAL, portal);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
@@ -306,7 +323,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       window.history.replaceState({}, '', url.toString());
     }
-  }, []);
+  }, [clearPortalRecords]);
 
   // Listen to Firebase Auth state
   useEffect(() => {
@@ -511,6 +528,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             safeRemoveStorage(STORAGE_KEYS.USER_DOC_ID);
             if (active) {
               setCurrentUser(null);
+              clearPortalRecords();
               if (activeUserId !== null) setActiveUserId(null);
             }
             return;
@@ -608,6 +626,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUser(null);
     setAdminUser(null);
     setBuilderSelections([]);
+    clearPortalRecords();
     void logoutFirebase();
   };
 

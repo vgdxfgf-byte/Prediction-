@@ -692,7 +692,10 @@ export function subscribeUserPortalData(
       query(collection(db, 'bets'), where('ownerUid', '==', authUid)),
       snap => {
         handlers.onBets(
-          snap.docs.map(d => mapBetDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          snap.docs
+            .map(d => mapBetDoc(d.id, d.data()))
+            .filter(b => b.userId === userId)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         );
       },
       error => reportListenerError(error, OperationType.LIST, 'bets')
@@ -705,7 +708,10 @@ export function subscribeUserPortalData(
         query(collection(db, 'parlay_bets'), where('ownerUid', '==', authUid)),
         snap => {
           handlers.onParlayBets?.(
-            snap.docs.map(d => mapParlayBetDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+            snap.docs
+              .map(d => mapParlayBetDoc(d.id, d.data()))
+              .filter(p => p.userId === userId)
+              .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           );
         },
         error => reportListenerError(error, OperationType.LIST, 'parlay_bets')
@@ -718,7 +724,10 @@ export function subscribeUserPortalData(
       query(collection(db, 'transactions'), where('ownerUid', '==', authUid)),
       snap => {
         handlers.onTransactions(
-          snap.docs.map(d => mapTransactionDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          snap.docs
+            .map(d => mapTransactionDoc(d.id, d.data()))
+            .filter(t => t.userId === userId)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         );
       },
       error => reportListenerError(error, OperationType.LIST, 'transactions')
@@ -730,7 +739,10 @@ export function subscribeUserPortalData(
       query(collection(db, 'deposits'), where('ownerUid', '==', authUid)),
       snap => {
         handlers.onDeposits(
-          snap.docs.map(d => mapDepositDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          snap.docs
+            .map(d => mapDepositDoc(d.id, d.data()))
+            .filter(d => d.userId === userId)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         );
       },
       error => reportListenerError(error, OperationType.LIST, 'deposits')
@@ -742,7 +754,10 @@ export function subscribeUserPortalData(
       query(collection(db, 'withdrawals'), where('ownerUid', '==', authUid)),
       snap => {
         handlers.onWithdrawals(
-          snap.docs.map(d => mapWithdrawalDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          snap.docs
+            .map(d => mapWithdrawalDoc(d.id, d.data()))
+            .filter(w => w.userId === userId)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         );
       },
       error => reportListenerError(error, OperationType.LIST, 'withdrawals')

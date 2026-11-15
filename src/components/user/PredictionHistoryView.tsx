@@ -38,10 +38,10 @@ export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ on
   if (!currentUser) return null;
 
   const userBets = bets.filter(
-    b => b.userId === currentUser.id || (b.ownerUid && currentUser.ownerUid && b.ownerUid === currentUser.ownerUid)
+    b => b.userId === currentUser.id && (!b.ownerUid || !currentUser.ownerUid || b.ownerUid === currentUser.ownerUid)
   );
   const userParlays = parlayBets.filter(
-    p => p.userId === currentUser.id || (p.ownerUid && currentUser.ownerUid && p.ownerUid === currentUser.ownerUid)
+    p => p.userId === currentUser.id && (!p.ownerUid || !currentUser.ownerUid || p.ownerUid === currentUser.ownerUid)
   );
 
   const settledBets = userBets.filter(b => b.result !== 'pending');

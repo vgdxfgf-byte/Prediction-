@@ -193,10 +193,12 @@ function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
 function getUserStatePayload(userId: string) {
   const user = db.users.find(u => u.id === userId);
   if (!user) return null;
+  const userBets = db.bets.filter(b => b.userId === userId);
+  const participatedPredIds = new Set(userBets.map(b => b.predictionId));
   return {
     user: sanitizeUser(user),
-    predictions: db.predictions,
-    bets: db.bets.filter(b => b.userId === userId),
+    predictions: db.predictions.filter(p => p.status !== 'settled' || participatedPredIds.has(p.id)),
+    bets: userBets,
     transactions: db.transactions.filter(t => t.userId === userId),
     deposits: db.deposits.filter(d => d.userId === userId),
     withdrawals: db.withdrawals.filter(w => w.userId === userId),

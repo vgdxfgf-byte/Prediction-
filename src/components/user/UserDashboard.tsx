@@ -107,12 +107,12 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 
   if (!currentUser) return null;
 
-  // Compute metrics for current user (singles + Bet Builder parlays)
+  // Compute metrics strictly for current user (singles + Bet Builder parlays)
   const userBets = bets.filter(
-    b => b.userId === currentUser.id || (b.ownerUid && currentUser.ownerUid && b.ownerUid === currentUser.ownerUid)
+    b => b.userId === currentUser.id && (!b.ownerUid || !currentUser.ownerUid || b.ownerUid === currentUser.ownerUid)
   );
   const userParlays = parlayBets.filter(
-    p => p.userId === currentUser.id || (p.ownerUid && currentUser.ownerUid && p.ownerUid === currentUser.ownerUid)
+    p => p.userId === currentUser.id && (!p.ownerUid || !currentUser.ownerUid || p.ownerUid === currentUser.ownerUid)
   );
   const activeBets = userBets.filter(b => b.result === 'pending');
   const activeParlays = userParlays.filter(p => p.result === 'pending');
@@ -131,11 +131,11 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     lostParlays.reduce((sum, p) => sum + p.amount, 0);
 
   const userDeposits = deposits.filter(
-    d => d.userId === currentUser.id || (d.ownerUid && currentUser.ownerUid && d.ownerUid === currentUser.ownerUid)
+    d => d.userId === currentUser.id && (!d.ownerUid || !currentUser.ownerUid || d.ownerUid === currentUser.ownerUid)
   );
   const depositById = new Map(userDeposits.map(d => [d.id, d]));
   const userWithdrawals = withdrawals.filter(
-    w => w.userId === currentUser.id || (w.ownerUid && currentUser.ownerUid && w.ownerUid === currentUser.ownerUid)
+    w => w.userId === currentUser.id && (!w.ownerUid || !currentUser.ownerUid || w.ownerUid === currentUser.ownerUid)
   );
   const withdrawalById = new Map(userWithdrawals.map(w => [w.id, w]));
   const pendingWithdrawals = userWithdrawals.filter(

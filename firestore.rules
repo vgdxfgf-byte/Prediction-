@@ -375,7 +375,11 @@ service cloud.firestore {
     }
 
     match /bets/{betId} {
-      allow get: if isValidId(betId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
+      allow get: if isValidId(betId) && (isAdmin() || (
+        isAuthenticatedAppUser() &&
+        existing().ownerUid == request.auth.uid &&
+        get(/databases/$(database)/documents/users/$(existing().userId)).data.ownerUid == request.auth.uid
+      ));
       allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
       allow create: if isAuthenticatedAppUser() && isValidId(betId) && isValidBet(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
@@ -392,7 +396,11 @@ service cloud.firestore {
     }
 
     match /parlay_bets/{parlayId} {
-      allow get: if isValidId(parlayId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
+      allow get: if isValidId(parlayId) && (isAdmin() || (
+        isAuthenticatedAppUser() &&
+        existing().ownerUid == request.auth.uid &&
+        get(/databases/$(database)/documents/users/$(existing().userId)).data.ownerUid == request.auth.uid
+      ));
       allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
       allow create: if isAuthenticatedAppUser() && isValidId(parlayId) && isValidParlayBet(incoming()) &&
         incoming().ownerUid == request.auth.uid &&

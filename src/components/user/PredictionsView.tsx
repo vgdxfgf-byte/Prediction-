@@ -38,11 +38,25 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({
   onSelectPrediction,
   onOpenBetBuilder
 }) => {
-  const { predictions, bets, currentUser, nowMs, builderSelections, toggleBuilderLeg } = useApp();
+  const { predictions, bets, parlayBets, currentUser, nowMs, builderSelections, toggleBuilderLeg } = useApp();
 
   const [selectedCategory, setSelectedCategory] = useState<'All' | PredictionCategory>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'open' | 'paused' | 'settled' | 'all'>('open');
+
+  const userParticipatedPredictionIds = new Set<string>();
+  if (currentUser) {
+    for (const b of bets) {
+      if (b.userId === currentUser.id) userParticipatedPredictionIds.add(b.predictionId);
+    }
+    for (const pb of parlayBets) {
+      if (pb.userId === currentUser.id) {
+        for (const leg of pb.legs) {
+          userParticipatedPredictionIds.add(leg.predictionId);
+        }
+      }
+    }
+  }
 
   const builderCombinedOdds = Number(
     Math.min(
@@ -54,8 +68,12 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({
     ).toFixed(2)
   );
 
-  // Filter predictions
+  // Filter predictions — settled markets are visible only to users who placed a bet on them
   const filteredPredictions = predictions.filter(p => {
+    if (p.status === 'settled' && !userParticipatedPredictionIds.has(p.id)) {
+      return false;
+    }
+
     if (selectedCategory !== 'All' && p.category !== selectedCategory) return false;
 
     const marketOpen = isMarketBettingOpen(p, nowMs);
