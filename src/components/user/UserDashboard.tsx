@@ -28,7 +28,8 @@ import {
   Image as ImageIcon,
   ZoomIn,
   Download,
-  X
+  X,
+  Layers
 } from 'lucide-react';
 import { WhatsAppSupportButton } from '../common/WhatsAppSupportButton';
 import {
@@ -44,6 +45,7 @@ interface UserDashboardProps {
   onOpenWithdraw: () => void;
   onOpenProfile: () => void;
   onOpenIdChat?: () => void;
+  onOpenBetBuilder?: () => void;
   hasUnreadChat?: boolean;
 }
 
@@ -57,9 +59,20 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   onOpenWithdraw,
   onOpenProfile,
   onOpenIdChat,
+  onOpenBetBuilder,
   hasUnreadChat
 }) => {
-  const { currentUser, bets, transactions, predictions, withdrawals, nowMs } = useApp();
+  const {
+    currentUser,
+    bets,
+    parlayBets,
+    transactions,
+    predictions,
+    withdrawals,
+    nowMs,
+    builderSelections,
+    toggleBuilderLeg
+  } = useApp();
   const [marketFilter, setMarketFilter] = useState<SpotlightFilter>('All');
   const [heroSlide, setHeroSlide] = useState<'cricket' | 'movies'>('cricket');
   const [heroImgError, setHeroImgError] = useState<Record<string, boolean>>({});
@@ -92,17 +105,28 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 
   if (!currentUser) return null;
 
-  // Compute metrics for current user
+  // Compute metrics for current user (singles + Bet Builder parlays)
   const userBets = bets.filter(
     b => b.userId === currentUser.id || (b.ownerUid && currentUser.ownerUid && b.ownerUid === currentUser.ownerUid)
   );
+  const userParlays = parlayBets.filter(
+    p => p.userId === currentUser.id || (p.ownerUid && currentUser.ownerUid && p.ownerUid === currentUser.ownerUid)
+  );
   const activeBets = userBets.filter(b => b.result === 'pending');
+  const activeParlays = userParlays.filter(p => p.result === 'pending');
   const settledBets = userBets.filter(b => b.result !== 'pending');
+  const settledParlays = userParlays.filter(p => p.result !== 'pending');
   const wonBets = userBets.filter(b => b.result === 'won');
+  const wonParlays = userParlays.filter(p => p.result === 'won');
   const lostBets = userBets.filter(b => b.result === 'lost');
+  const lostParlays = userParlays.filter(p => p.result === 'lost');
 
-  const totalWinningCoins = wonBets.reduce((sum, b) => sum + b.actualWinnings, 0);
-  const totalLosingCoins = lostBets.reduce((sum, b) => sum + b.amount, 0);
+  const totalWinningCoins =
+    wonBets.reduce((sum, b) => sum + b.actualWinnings, 0) +
+    wonParlays.reduce((sum, p) => sum + p.actualWinnings, 0);
+  const totalLosingCoins =
+    lostBets.reduce((sum, b) => sum + b.amount, 0) +
+    lostParlays.reduce((sum, p) => sum + p.amount, 0);
 
   const userWithdrawals = withdrawals.filter(
     w => w.userId === currentUser.id || (w.ownerUid && currentUser.ownerUid && w.ownerUid === currentUser.ownerUid)
@@ -123,7 +147,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     {
       label: 'Total Winnings',
       value: totalWinningCoins.toLocaleString(),
-      sub: `${wonBets.length} won picks`,
+      sub: `${wonBets.length + wonParlays.length} won slips`,
       valueClass: 'text-[#14e071]',
       icon: <Trophy className="w-4 h-4 text-[#14e071]" />,
       onClick: () => onNavigateTab('history')
@@ -131,22 +155,22 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     {
       label: 'Total Losses',
       value: totalLosingCoins.toLocaleString(),
-      sub: `${lostBets.length} settled`,
+      sub: `${settledBets.length + settledParlays.length} settled`,
       valueClass: 'text-rose-400',
       icon: <TrendingDown className="w-4 h-4 text-rose-400" />,
       onClick: () => onNavigateTab('history')
     },
     {
       label: 'Active Slips',
-      value: activeBets.length.toLocaleString(),
-      sub: 'Awaiting result',
+      value: (activeBets.length + activeParlays.length).toLocaleString(),
+      sub: activeParlays.length > 0 ? `${activeParlays.length} combo · awaiting` : 'Awaiting result',
       valueClass: 'text-sky-400',
       icon: <Activity className="w-4 h-4 text-sky-400" />,
       onClick: () => onNavigateTab('history')
     },
     {
       label: 'Total Predictions',
-      value: userBets.length.toLocaleString(),
+      value: (userBets.length + userParlays.length).toLocaleString(),
       sub: 'Tap for Bet History',
       valueClass: 'text-white',
       icon: <ShieldCheck className="w-4 h-4 text-slate-300" />,
@@ -556,7 +580,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                     No open {marketFilter} markets right now
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Browse all live exchange markets or check back soon for upcoming events.
+                    Browse all live prediction markets or check back soon for upcoming events.
                   </p>
                 </div>
                 <button
@@ -636,7 +660,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                             whileHover={{ scale: 1.02 }}
                             whileTap={{ scale: 0.96 }}
                             onClick={() => onSelectPrediction(pred, 'YES')}
-                            className="py-2.5 px-3 rounded-xl bg-emerald-950/55 hover:bg-emerald-900/70 border border-[#14e071]/40 hover:border-[#14e071] text-white font-bold text-xs flex items-center justify-between transition cursor-pointer"
+                            className="py-2.5 px-3 rounded-xl border bg-emerald-950/55 hover:bg-emerald-900/70 border-[#14e071]/40 hover:border-[#14e071] text-white font-bold text-xs flex items-center justify-between transition cursor-pointer"
                           >
                             <span className="flex items-center gap-1.5 text-[#14e071]">
                               <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -662,6 +686,42 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                             </span>
                           </motion.button>
                         </div>
+
+                        {(() => {
+                          const builderLeg = builderSelections.find(s => s.prediction.id === pred.id);
+                          return (
+                            <div className="flex items-center justify-between gap-2 pt-1 text-[11px]">
+                              <span className="text-slate-400 flex items-center gap-1">
+                                <Layers className="w-3.5 h-3.5 text-[#14e071]" />
+                                Bet Builder
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleBuilderLeg(pred, 'YES')}
+                                  className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                                    builderLeg?.choice === 'YES'
+                                      ? 'bg-[#14e071] text-[#04130b]'
+                                      : 'bg-white/[0.06] hover:bg-emerald-500/20 text-slate-200'
+                                  }`}
+                                >
+                                  {builderLeg?.choice === 'YES' ? '✓ YES' : '+ YES'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleBuilderLeg(pred, 'NO')}
+                                  className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                                    builderLeg?.choice === 'NO'
+                                      ? 'bg-rose-500 text-white'
+                                      : 'bg-white/[0.06] hover:bg-rose-500/20 text-slate-200'
+                                  }`}
+                                >
+                                  {builderLeg?.choice === 'NO' ? '✓ NO' : '+ NO'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </motion.div>
                   );
@@ -683,7 +743,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-sm text-white flex items-center gap-2">
                 <History className="w-4 h-4 text-[#14e071]" />
-                Active Slips ({activeBets.length})
+                Active Slips ({activeBets.length + activeParlays.length})
               </h3>
               <button
                 onClick={() => onNavigateTab('history')}
@@ -693,12 +753,35 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               </button>
             </div>
 
-            {activeBets.length === 0 ? (
+            {activeBets.length === 0 && activeParlays.length === 0 ? (
               <div className="py-6 text-center text-slate-400 text-xs">
-                No active predictions. Pick a market to start!
+                No active predictions. Pick a market or build a combo!
               </div>
             ) : (
               <div className="space-y-2">
+                {activeParlays.slice(0, 2).map(pb => (
+                  <div
+                    key={pb.id}
+                    className="p-3 rounded-xl bg-[#070c10] border border-[#14e071]/25 text-xs space-y-1"
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="font-semibold text-white line-clamp-1 text-[11px] flex items-center gap-1">
+                        <Layers className="w-3 h-3 text-[#14e071] shrink-0" />
+                        Bet Builder ({pb.legCount} Legs)
+                      </span>
+                      <span className="font-bold font-mono-numbers text-[11px] text-[#14e071] shrink-0">
+                        {pb.effectiveOdds.toFixed(2)}x
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px] text-slate-400 font-mono-numbers">
+                      <span>Stake: {pb.amount}</span>
+                      <span className="text-[#14e071] font-semibold">
+                        Win: {pb.potentialWinnings}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+
                 {activeBets.slice(0, 3).map((b, idx) => (
                   <motion.div
                     key={b.id}
@@ -742,7 +825,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-sm text-white flex items-center gap-2">
                 <Trophy className="w-4 h-4 text-[#14e071]" />
-                Bet Results ({settledBets.length})
+                Bet Results ({settledBets.length + settledParlays.length})
               </h3>
               <button
                 onClick={() => onNavigateTab('history')}
@@ -752,12 +835,49 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               </button>
             </div>
 
-            {settledBets.length === 0 ? (
+            {settledBets.length === 0 && settledParlays.length === 0 ? (
               <div className="py-5 text-center text-slate-400 text-xs">
                 No settled bet results yet. Results appear here as soon as admin settles a market.
               </div>
             ) : (
               <div className="space-y-2">
+                {settledParlays.slice(0, 2).map(pb => {
+                  const isWon = pb.result === 'won';
+                  const isVoided = pb.result === 'voided';
+                  return (
+                    <div
+                      key={pb.id}
+                      className="p-3 rounded-xl bg-[#070c10] border border-[#14e071]/20 text-xs space-y-1"
+                    >
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="font-semibold text-white line-clamp-1 text-[11px] flex items-center gap-1">
+                          <Layers className="w-3 h-3 text-[#14e071] shrink-0" />
+                          Bet Builder ({pb.legCount} Legs)
+                        </span>
+                        <span
+                          className={`font-bold font-mono-numbers text-[11px] shrink-0 ${
+                            isWon
+                              ? 'text-[#14e071]'
+                              : isVoided
+                                ? 'text-slate-300'
+                                : 'text-rose-400'
+                          }`}
+                        >
+                          {isWon
+                            ? `WON +${pb.actualWinnings.toLocaleString()}`
+                            : isVoided
+                              ? `REFUND +${pb.actualWinnings.toLocaleString()}`
+                              : `LOST -${pb.amount.toLocaleString()}`}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[10px] text-slate-400 font-mono-numbers">
+                        <span>Odds: {pb.effectiveOdds.toFixed(2)}x</span>
+                        <span>Stake: {pb.amount.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+
                 {settledBets.slice(0, 3).map((b, idx) => {
                   const isWon = b.result === 'won';
                   const isVoided = b.result === 'voided';

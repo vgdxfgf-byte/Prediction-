@@ -8,6 +8,7 @@ import { motion, AnimatePresence, MotionConfig } from 'motion/react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/common/Header';
 import { BetSlipModal } from './components/common/BetSlipModal';
+import { BetBuilderBar } from './components/common/BetBuilderBar';
 import { getUserSupportChatId, subscribeIdChatThread } from './services/firestoreService';
 
 // User Portal Components
@@ -49,7 +50,6 @@ import {
   Trophy,
   AlertTriangle,
   Wallet,
-  User as UserIcon,
   Layers,
   MessageSquareText
 } from 'lucide-react';
@@ -65,6 +65,7 @@ const MainAppContent: React.FC = () => {
     deposits,
     withdrawals,
     idChats,
+    predictions,
     portalDataError
   } = useApp();
 
@@ -72,9 +73,10 @@ const MainAppContent: React.FC = () => {
   const [userTab, setUserTab] = useState<string>('dashboard');
   const [adminTab, setAdminTab] = useState<string>('dashboard');
 
-  // Bet Slip Modal State
+  // Bet Slip & Bet Builder Modal State
   const [betModalPrediction, setBetModalPrediction] = useState<Prediction | null>(null);
   const [betModalChoice, setBetModalChoice] = useState<'YES' | 'NO'>('YES');
+  const [betBuilderOpen, setBetBuilderOpen] = useState<boolean>(false);
 
   // User Profile / Change Password Modal & Live Admin Chat Modal
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
@@ -114,7 +116,7 @@ const MainAppContent: React.FC = () => {
       <div className="min-h-screen bg-[#060b0e] text-slate-200 flex flex-col items-center justify-center gap-3">
         <div className="w-10 h-10 rounded-full border-2 border-[#14e071]/25 border-t-[#14e071] animate-spin" />
         <p className="text-xs text-slate-400 font-medium tracking-wide">
-          Connecting to ApexPredict Exchange...
+          Connecting to ApexPredict...
         </p>
       </div>
     );
@@ -158,7 +160,7 @@ const MainAppContent: React.FC = () => {
           <Header currentTab={adminTab} setCurrentTab={setAdminTab} />
           <AdminLogin onGoToUserApp={() => setActivePortal('user')} />
           <footer className="py-4 text-center text-xs text-slate-500 border-t border-white/[0.06]">
-            ApexPredict Exchange © 2026 • Administrator Console
+            ApexPredict © 2026 • Administrator Console
           </footer>
         </div>
       );
@@ -319,7 +321,7 @@ const MainAppContent: React.FC = () => {
 
         <footer className="py-5 text-center text-xs text-slate-500 border-t border-white/[0.06] bg-[#060b0e]">
           <div className="max-w-[1440px] mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-            <span>ApexPredict Exchange • Admin Control Center</span>
+            <span>ApexPredict • Admin Control Center</span>
             <div className="flex items-center gap-3 text-slate-400">
               <span className="flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-[#14e071]" />
@@ -346,7 +348,7 @@ const MainAppContent: React.FC = () => {
         <Header currentTab={userTab} setCurrentTab={setUserTab} />
         <UserLogin onGoToAdmin={() => setActivePortal('admin')} />
         <footer className="py-4 text-center text-xs text-slate-500 border-t border-white/[0.06]">
-          ApexPredict Sports & Events Prediction Exchange © 2026
+          ApexPredict Sports &amp; Events Prediction Platform © 2026
         </footer>
       </div>
     );
@@ -362,10 +364,11 @@ const MainAppContent: React.FC = () => {
         onOpenWithdrawalHistory={() => handleOpenWalletTab('withdrawals')}
         onOpenProfile={() => setShowProfileModal(true)}
         onOpenChat={() => setShowUserIdChat(true)}
+        onOpenBetBuilder={() => setBetBuilderOpen(true)}
         hasUnreadChat={hasUnreadUserChat}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-28 lg:pb-10">
         {portalDataError && (
           <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/35 text-amber-200 text-xs flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -392,12 +395,16 @@ const MainAppContent: React.FC = () => {
                 onOpenWithdraw={handleOpenWithdraw}
                 onOpenProfile={() => setShowProfileModal(true)}
                 onOpenIdChat={() => setShowUserIdChat(true)}
+                onOpenBetBuilder={() => setBetBuilderOpen(true)}
                 hasUnreadChat={hasUnreadUserChat}
               />
             )}
 
             {userTab === 'predictions' && (
-              <PredictionsView onSelectPrediction={handleSelectPrediction} />
+              <PredictionsView
+                onSelectPrediction={handleSelectPrediction}
+                onOpenBetBuilder={() => setBetBuilderOpen(true)}
+              />
             )}
 
             {userTab === 'history' && (
@@ -419,9 +426,9 @@ const MainAppContent: React.FC = () => {
       {/* Mobile Bottom Dock */}
       <nav
         aria-label="Mobile Navigation"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#080f14]/95 backdrop-blur-lg border-t border-white/[0.08] px-2 py-1.5"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#080f14]/95 backdrop-blur-lg border-t border-white/[0.08] px-1.5 py-1.5"
       >
-        <div className="max-w-md mx-auto grid grid-cols-5 items-center">
+        <div className="max-w-md mx-auto grid grid-cols-4 items-center">
           <button
             type="button"
             onClick={() => setUserTab('dashboard')}
@@ -452,7 +459,7 @@ const MainAppContent: React.FC = () => {
             }`}
           >
             <Trophy className="w-4 h-4" />
-            <span>Bet Results</span>
+            <span>Results</span>
           </button>
 
           <button
@@ -465,23 +472,23 @@ const MainAppContent: React.FC = () => {
             <Wallet className="w-4 h-4" />
             <span>Wallet</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => setShowProfileModal(true)}
-            className="flex flex-col items-center gap-0.5 py-1 rounded-xl text-[10px] font-semibold text-slate-400 hover:text-[#14e071] transition cursor-pointer"
-          >
-            <UserIcon className="w-4 h-4" />
-            <span>Profile</span>
-          </button>
         </div>
       </nav>
+
+      {/* Persistent Bet Builder Combo Bar & Drawer */}
+      <BetBuilderBar
+        isOpen={betBuilderOpen}
+        setIsOpen={setBetBuilderOpen}
+        onSuccessViewHistory={() => setUserTab('history')}
+        onOpenDeposit={handleOpenDeposit}
+        onGoToMarkets={() => setUserTab('predictions')}
+      />
 
       {/* Floating Bet Slip Modal */}
       <AnimatePresence>
         {betModalPrediction && (
           <BetSlipModal
-            prediction={betModalPrediction}
+            prediction={predictions.find(p => p.id === betModalPrediction.id) || betModalPrediction}
             initialChoice={betModalChoice}
             onClose={() => setBetModalPrediction(null)}
             onSuccessViewHistory={() => {
@@ -514,9 +521,9 @@ const MainAppContent: React.FC = () => {
       {/* Footer */}
       <footer className="hidden lg:block py-5 text-center text-xs text-slate-500 border-t border-white/[0.06] bg-[#060b0e]">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>ApexPredict Sports & Events Prediction Exchange • 100% Fair Coin Settlement</span>
+          <span>ApexPredict Sports &amp; Events Prediction Platform • 100% Fair Coin Settlement</span>
           <div className="flex items-center gap-3 text-slate-400">
-            <span>Instant Exchange</span>
+            <span>Instant Coin Settlement</span>
             <span>·</span>
             <button
               onClick={() => setActivePortal('admin')}

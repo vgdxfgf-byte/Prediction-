@@ -27,6 +27,7 @@ interface HeaderProps {
   onOpenWithdrawalHistory?: () => void;
   onOpenProfile?: () => void;
   onOpenChat?: () => void;
+  onOpenBetBuilder?: () => void;
   hasUnreadChat?: boolean;
   currentTab: string;
   setCurrentTab: (tab: string) => void;
@@ -37,6 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenWithdrawalHistory,
   onOpenProfile,
   onOpenChat,
+  onOpenBetBuilder,
   hasUnreadChat,
   currentTab,
   setCurrentTab
@@ -50,7 +52,8 @@ export const Header: React.FC<HeaderProps> = ({
     changeAdminCredentials,
     deposits,
     withdrawals,
-    idChats
+    idChats,
+    builderSelections
   } = useApp();
 
   const [showUserDropdown, setShowUserDropdown] = useState(false);
@@ -213,6 +216,29 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center gap-2.5 shrink-0">
               {activePortal === 'user' && currentUser && (
                 <>
+                  {builderSelections.length > 0 && onOpenBetBuilder && (
+                    <button
+                      type="button"
+                      onClick={onOpenBetBuilder}
+                      className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-[#14e071]/45 text-[#14e071] text-xs font-bold whitespace-nowrap shrink-0 transition cursor-pointer"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Builder ({builderSelections.length})</span>
+                      <span className="font-mono-numbers text-white">
+                        {Number(
+                          Math.min(
+                            100000,
+                            builderSelections.reduce(
+                              (acc, s) =>
+                                acc * (s.choice === 'YES' ? s.prediction.yesOdds : s.prediction.noOdds),
+                              1
+                            )
+                          ).toFixed(2)
+                        )}
+                        x
+                      </span>
+                    </button>
+                  )}
                   {/* Balance Pill */}
                   <button
                     type="button"

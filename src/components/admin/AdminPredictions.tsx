@@ -1,22 +1,26 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Prediction, PredictionCategory, PredictionStatus } from '../../types';
-import { 
-  Plus, 
-  Layers, 
-  Search, 
-  Play, 
-  Pause, 
-  Lock, 
-  Trash2, 
-  Edit3, 
-  CheckCircle2, 
-  XCircle, 
-  RotateCcw, 
-  AlertTriangle, 
+import {
+  Prediction,
+  PredictionCategory,
+  PredictionStatus
+} from '../../types';
+import {
+  Plus,
+  Search,
+  Play,
+  Pause,
+  Lock,
+  Trash2,
+  Edit3,
+  CheckCircle2,
+  AlertTriangle,
   Trophy,
   Clock,
-  Coins
+  Radio,
+  RefreshCw,
+  Zap,
+  Layers
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -25,6 +29,10 @@ import {
   toLocalDatetimeInputValue,
   formatCountdownToClose
 } from '../../utils/marketTiming';
+import {
+  buildLiveCricketSessionAnalysis,
+  type CricketMarketSuggestion
+} from '../../utils/cricketSessionOdds';
 
 interface AdminPredictionsProps {
   initialCreateOpen?: boolean;
@@ -45,19 +53,30 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
   initialCreateOpen,
   onClearInitialCreate
 }) => {
-  const { 
-    predictions, 
-    createPrediction, 
-    updatePrediction, 
-    setPredictionStatus, 
-    deletePrediction, 
+  const {
+    predictions,
+    createPrediction,
+    updatePrediction,
+    setPredictionStatus,
+    deletePrediction,
     settlePrediction,
     bets,
-    nowMs
+    nowMs,
+    liveCricketMatches,
+    cricketStreamConnected,
+    cricketLoading,
+    activeCricketDetail,
+    cricketDetailLoading,
+    refreshCricketMatches,
+    selectCricketMatchForDetail
   } = useApp();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | PredictionStatus>('all');
+  const [liveMatchFilter, setLiveMatchFilter] = useState<'in' | 'pre' | 'all'>('in');
+  const [liveMatchSearch, setLiveMatchSearch] = useState('');
+  const [quickPublishingId, setQuickPublishingId] = useState<string | null>(null);
+  const [createNotice, setCreateNotice] = useState<string | null>(null);
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState<boolean>(!!initialCreateOpen);
@@ -79,6 +98,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000))
   );
   const [description, setDescription] = useState('');
+  const [cricketMatchId, setCricketMatchId] = useState<string>('');
+  const [cricketLeagueId, setCricketLeagueId] = useState<string>('');
   const [formError, setFormError] = useState('');
 
   // Settlement Form State
@@ -104,6 +125,32 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     return true;
   });
 
+  const liveRunningMatches = liveCricketMatches.filter(m => m.status === 'in');
+  const upcomingCricketMatches = liveCricketMatches.filter(m => m.status === 'pre');
+  const modalCricketMatches = (
+    liveMatchFilter === 'in'
+      ? liveRunningMatches
+      : liveMatchFilter === 'pre'
+        ? upcomingCricketMatches
+        : liveCricketMatches
+  ).filter(m => {
+    if (!liveMatchSearch.trim()) return true;
+    const q = liveMatchSearch.toLowerCase();
+    return (
+      m.name.toLowerCase().includes(q) ||
+      m.shortName.toLowerCase().includes(q) ||
+      m.leagueName.toLowerCase().includes(q)
+    );
+  });
+
+  const selectedLiveMatch = liveCricketMatches.find(m => m.id === cricketMatchId) || null;
+  const selectedMatchAnalysis = selectedLiveMatch
+    ? buildLiveCricketSessionAnalysis(
+        selectedLiveMatch,
+        activeCricketDetail?.match.id === selectedLiveMatch.id ? activeCricketDetail : null
+      )
+    : null;
+
   const handleOpenCreate = () => {
     setTitle('');
     setSubtitle('');
@@ -114,8 +161,88 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setMaxBet(5000);
     setClosingTime(toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
     setDescription('');
+    setCricketMatchId('');
+    setCricketLeagueId('');
     setFormError('');
+    setCreateNotice(null);
+    setLiveMatchSearch('');
+    setLiveMatchFilter(liveRunningMatches.length > 0 ? 'in' : 'all');
+    void refreshCricketMatches();
     setShowCreateModal(true);
+  };
+
+  const handleSelectCricketMatch = (matchId: string) => {
+    setCricketMatchId(matchId);
+    setCreateNotice(null);
+    if (!matchId) {
+      setCricketLeagueId('');
+      void selectCricketMatchForDetail(null);
+      return;
+    }
+    const found = liveCricketMatches.find(m => m.id === matchId);
+    if (found) {
+      setCricketLeagueId(found.leagueId);
+      setCategory('Cricket');
+      void selectCricketMatchForDetail(found);
+      const analysis = buildLiveCricketSessionAnalysis(found);
+      const firstSuggestion = analysis.suggestions[0];
+      if (firstSuggestion) {
+        setTitle(firstSuggestion.title);
+        setSubtitle(firstSuggestion.subtitle);
+        setYesOdds(firstSuggestion.yesOdds);
+        setNoOdds(firstSuggestion.noOdds);
+        setClosingTime(
+          toLocalDatetimeInputValue(
+            new Date(Date.now() + firstSuggestion.closingMinutesFromNow * 60 * 1000)
+          )
+        );
+        setDescription(firstSuggestion.description);
+      } else if (!subtitle.trim()) {
+        setSubtitle(`${found.shortName} · ${found.format}`);
+      }
+    }
+  };
+
+  const handleApplySuggestion = (s: CricketMarketSuggestion) => {
+    setCategory('Cricket');
+    setTitle(s.title);
+    setSubtitle(s.subtitle);
+    setYesOdds(s.yesOdds);
+    setNoOdds(s.noOdds);
+    setClosingTime(
+      toLocalDatetimeInputValue(new Date(Date.now() + s.closingMinutesFromNow * 60 * 1000))
+    );
+    setDescription(s.description);
+    setFormError('');
+    setCreateNotice(`Loaded "${s.label}" (${s.yesOdds.toFixed(2)}x / ${s.noOdds.toFixed(2)}x) into form below.`);
+  };
+
+  const handleQuickPublishSuggestion = async (s: CricketMarketSuggestion) => {
+    if (!selectedLiveMatch) return;
+    setFormError('');
+    setCreateNotice(null);
+    setQuickPublishingId(s.id);
+    const closingIso = new Date(Date.now() + s.closingMinutesFromNow * 60 * 1000).toISOString();
+    const res = await createPrediction({
+      title: s.title,
+      subtitle: s.subtitle,
+      category: 'Cricket',
+      yesOdds: s.yesOdds,
+      noOdds: s.noOdds,
+      minBet: Number(minBet) > 0 ? Number(minBet) : 50,
+      maxBet: Number(maxBet) > Number(minBet) ? Number(maxBet) : 5000,
+      closingTime: closingIso,
+      status: 'open',
+      description: s.description,
+      cricketMatchId: selectedLiveMatch.id,
+      cricketLeagueId: selectedLiveMatch.leagueId
+    });
+    setQuickPublishingId(null);
+    if (res.success) {
+      setCreateNotice(`Published "${s.label}" live for users (${s.yesOdds.toFixed(2)}x YES / ${s.noOdds.toFixed(2)}x NO).`);
+    } else {
+      setFormError(res.error || 'Failed to publish live prediction');
+    }
   };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
@@ -154,7 +281,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       maxBet: Number(maxBet),
       closingTime: closingDate.toISOString(),
       status: 'open',
-      description: description.trim()
+      description: description.trim(),
+      ...(cricketMatchId ? { cricketMatchId, cricketLeagueId } : {})
     });
 
     if (res.success) {
@@ -177,6 +305,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setMaxBet(p.maxBet);
     setClosingTime(toLocalDatetimeInputValue(p.closingTime));
     setDescription(p.description || '');
+    setCricketMatchId(p.cricketMatchId || '');
+    setCricketLeagueId(p.cricketLeagueId || '');
     setFormError(options?.reason || '');
   };
 
@@ -191,6 +321,10 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     }
     if (yesOdds <= 1 || noOdds <= 1) {
       setFormError('Odds must be strictly greater than 1.00');
+      return;
+    }
+    if (minBet <= 0 || maxBet <= minBet) {
+      setFormError('Max prediction limit must be strictly greater than min bet');
       return;
     }
     const closingDate = new Date(closingTime);
@@ -212,7 +346,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
 
     const res = await updatePrediction(editPred.id, {
       title: title.trim(),
-      subtitle,
+      subtitle: subtitle.trim() || 'Official Match Prediction',
       category,
       yesOdds: Number(yesOdds),
       noOdds: Number(noOdds),
@@ -220,7 +354,9 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       maxBet: Number(maxBet),
       closingTime: closingDate.toISOString(),
       status: nextStatus,
-      description
+      description: description.trim(),
+      cricketMatchId: cricketMatchId || undefined,
+      cricketLeagueId: cricketLeagueId || undefined
     });
 
     if (res.success) {
@@ -267,24 +403,37 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       {/* Header and Add Button */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <span>Prediction Markets & Settlement</span>
+          <h2 className="text-xl font-bold text-white flex flex-wrap items-center gap-2">
+            <span>Prediction Markets &amp; Settlement</span>
             <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-xs font-semibold">
               {predictions.length} Total Markets
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Create prediction questions, configure YES/NO odds multipliers, pause/close betting, and resolve outcomes.
+            Create, manage, pause, and settle YES/NO prediction markets across Cricket, Movies, Football, and more.
           </p>
         </div>
 
-        <button
-          onClick={handleOpenCreate}
-          className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-amber-950/40 transition cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          Create New Prediction
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              handleOpenCreate();
+              setLiveMatchFilter('in');
+            }}
+            className="px-3.5 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold text-xs flex items-center gap-2 whitespace-nowrap shrink-0 transition cursor-pointer"
+          >
+            <Radio className="w-3.5 h-3.5 text-[#14e071]" />
+            <span>Live Cricket ({liveRunningMatches.length} Running)</span>
+          </button>
+          <button
+            onClick={handleOpenCreate}
+            className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-amber-950/40 whitespace-nowrap shrink-0 transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Create New Prediction
+          </button>
+        </div>
       </div>
 
       {/* Delete Notice Banner */}
@@ -533,24 +682,288 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       {/* CREATE PREDICTION MODAL */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-base text-white flex items-center gap-2">
-                <Plus className="w-4 h-4 text-amber-400" />
-                Create New Prediction Market
-              </h3>
+          <div className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2">
+              <div>
+                <h3 className="font-bold text-base text-white flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-amber-400" />
+                  Create New Prediction Market
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Pick any live running cricket match to see real-time Match Winner &amp; Session odds, or build a custom market.
+                </p>
+              </div>
               <button
+                type="button"
                 onClick={() => {
                   setShowCreateModal(false);
+                  void selectCricketMatchForDetail(null);
                   onClearInitialCreate?.();
                 }}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white p-1 cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleCreateSubmit} className="p-5 overflow-y-auto space-y-4 text-xs">
+            <form onSubmit={handleCreateSubmit} className="p-5 overflow-y-auto space-y-5 text-xs">
+              {/* Live Running Cricket Matches & Session Odds Panel */}
+              <div className="rounded-2xl bg-slate-950/90 border border-slate-800 p-4 space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-[#14e071]" />
+                    <span className="font-bold text-sm text-white">Live Running Matches &amp; Session Odds</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full ${
+                          cricketStreamConnected ? 'bg-[#14e071] animate-pulse' : 'bg-amber-400'
+                        }`}
+                      />
+                      {cricketStreamConnected ? 'Live Stream' : 'Syncing'}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px]">
+                      {[
+                        { id: 'in' as const, label: `Live (${liveRunningMatches.length})` },
+                        { id: 'pre' as const, label: `Upcoming (${upcomingCricketMatches.length})` },
+                        { id: 'all' as const, label: `All (${liveCricketMatches.length})` }
+                      ].map(tab => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setLiveMatchFilter(tab.id)}
+                          className={`px-2.5 py-1 rounded-md font-semibold whitespace-nowrap transition cursor-pointer ${
+                            liveMatchFilter === tab.id
+                              ? 'bg-[#14e071] text-[#04130b]'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => void refreshCricketMatches()}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 flex items-center gap-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${cricketLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+
+                {/* Search Matches */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={liveMatchSearch}
+                      onChange={e => setLiveMatchSearch(e.target.value)}
+                      placeholder="Filter live matches or series..."
+                      className="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  {cricketMatchId && (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectCricketMatch('')}
+                      className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 font-semibold whitespace-nowrap cursor-pointer"
+                    >
+                      Clear Selected Match
+                    </button>
+                  )}
+                </div>
+
+                {/* Live Match List */}
+                {modalCricketMatches.length === 0 ? (
+                  <div className="py-5 text-center text-slate-400 text-[11px] border border-dashed border-slate-800 rounded-xl">
+                    {cricketLoading
+                      ? 'Loading live cricket matches...'
+                      : liveMatchFilter === 'in'
+                        ? 'No live running matches found in this filter right now. Switch to Upcoming or All above, or create a custom market below.'
+                        : 'No matching cricket fixtures found.'}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto pr-1">
+                    {modalCricketMatches.map(m => {
+                      const isSelected = cricketMatchId === m.id;
+                      const previewAnalysis = buildLiveCricketSessionAnalysis(m);
+                      const mw = previewAnalysis.suggestions[0];
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => handleSelectCricketMatch(m.id)}
+                          className={`p-3 rounded-xl border text-left space-y-1.5 transition cursor-pointer ${
+                            isSelected
+                              ? 'bg-emerald-950/35 border-[#14e071] ring-1 ring-[#14e071]/40'
+                              : 'bg-slate-900/90 hover:bg-slate-900 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 text-[10px]">
+                            <span className="text-slate-400 truncate">
+                              {m.leagueName} · {m.format}
+                            </span>
+                            <span
+                              className={`font-bold shrink-0 ${
+                                m.status === 'in'
+                                  ? 'text-[#14e071]'
+                                  : m.status === 'pre'
+                                    ? 'text-amber-400'
+                                    : 'text-slate-400'
+                              }`}
+                            >
+                              {m.status === 'in' ? 'LIVE' : m.statusText}
+                            </span>
+                          </div>
+
+                          <div className="space-y-0.5 text-[11px]">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`font-bold truncate ${m.homeTeam.isBatting ? 'text-[#14e071]' : 'text-white'}`}>
+                                {m.homeTeam.shortName || m.homeTeam.name}
+                              </span>
+                              <span className="font-mono font-bold text-slate-200 shrink-0">
+                                {m.homeTeam.score || '—'}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`font-bold truncate ${m.awayTeam.isBatting ? 'text-[#14e071]' : 'text-white'}`}>
+                                {m.awayTeam.shortName || m.awayTeam.name}
+                              </span>
+                              <span className="font-mono font-bold text-slate-200 shrink-0">
+                                {m.awayTeam.score || '—'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-[10px]">
+                            <span className="text-slate-400 truncate">{m.statusSummary}</span>
+                            {mw && (
+                              <span className="font-mono text-emerald-300 font-bold shrink-0">
+                                {mw.yesOdds.toFixed(2)}x / {mw.noOdds.toFixed(2)}x
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Selected Match Live Match & Session Odds Board */}
+                {selectedLiveMatch && selectedMatchAnalysis && (
+                  <div className="pt-3 border-t border-slate-800 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>{selectedLiveMatch.name}</span>
+                          <span className="text-[11px] font-normal text-slate-400">
+                            {selectedLiveMatch.format} · {selectedLiveMatch.venue}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-mono mt-0.5 flex flex-wrap items-center gap-2">
+                          <span>{selectedLiveMatch.statusSummary}</span>
+                          {selectedMatchAnalysis.currentRunRate !== null && (
+                            <>
+                              <span>·</span>
+                              <span className="text-[#14e071]">
+                                CRR {selectedMatchAnalysis.currentRunRate.toFixed(2)}
+                              </span>
+                            </>
+                          )}
+                          {selectedMatchAnalysis.requiredRunRate !== null && (
+                            <>
+                              <span>·</span>
+                              <span className="text-amber-300">
+                                RRR {selectedMatchAnalysis.requiredRunRate.toFixed(2)}
+                              </span>
+                            </>
+                          )}
+                          {selectedMatchAnalysis.projectedTotal !== null && (
+                            <>
+                              <span>·</span>
+                              <span className="text-sky-300">
+                                Proj {selectedMatchAnalysis.projectedTotal}
+                              </span>
+                            </>
+                          )}
+                          {cricketDetailLoading && <span className="text-slate-500">· Syncing scorecard...</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                      {selectedMatchAnalysis.suggestions.map(s => (
+                        <div
+                          key={s.id}
+                          className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex flex-col justify-between gap-2.5"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between gap-2 text-[10px]">
+                              <span className="font-bold text-[#14e071] uppercase tracking-wide flex items-center gap-1">
+                                <Layers className="w-3 h-3" />
+                                {s.kind} · {s.label}
+                              </span>
+                              <span className="font-mono text-slate-400 shrink-0">
+                                Win Prob {s.yesProbPct}%
+                              </span>
+                            </div>
+                            <div className="text-xs font-semibold text-white leading-snug">
+                              {s.title}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              {s.liveContext}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                            <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold">
+                                YES {s.yesOdds.toFixed(2)}x
+                              </span>
+                              <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 font-bold">
+                                NO {s.noOdds.toFixed(2)}x
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleApplySuggestion(s)}
+                                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-[11px] whitespace-nowrap cursor-pointer"
+                              >
+                                Fill Form
+                              </button>
+                              <button
+                                type="button"
+                                disabled={quickPublishingId === s.id}
+                                onClick={() => void handleQuickPublishSuggestion(s)}
+                                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-slate-950 font-bold text-[11px] flex items-center gap-1 whitespace-nowrap cursor-pointer"
+                              >
+                                <Zap className="w-3 h-3" />
+                                {quickPublishingId === s.id ? 'Publishing...' : 'Publish Live'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {createNotice && (
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 flex items-center gap-1.5 text-[11px]">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{createNotice}</span>
+                  </div>
+                )}
+              </div>
+
               {/* Question */}
               <div className="space-y-1">
                 <label className="text-slate-300 font-semibold block">
@@ -593,37 +1006,38 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                 </div>
               </div>
 
-              {/* Odds configuration */}
-              <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
-                <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
-                  Odds Configuration (Multiplier Format)
+              {/* YES & NO Odds Multipliers */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-emerald-400 font-semibold block">
+                    YES Odds Multiplier *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1.01"
+                    max="50"
+                    required
+                    value={yesOdds}
+                    onChange={e => setYesOdds(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
+                  />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-emerald-400 font-semibold block">YES Odds Multiplier</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="1.01"
-                      max="50"
-                      value={yesOdds}
-                      onChange={e => setYesOdds(Number(e.target.value))}
-                      className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
-                    />
-                  </div>
 
-                  <div className="space-y-1">
-                    <label className="text-rose-400 font-semibold block">NO Odds Multiplier</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="1.01"
-                      max="50"
-                      value={noOdds}
-                      onChange={e => setNoOdds(Number(e.target.value))}
-                      className="w-full bg-slate-900 border border-slate-700 focus:border-rose-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
-                    />
-                  </div>
+                <div className="space-y-1">
+                  <label className="text-rose-400 font-semibold block">
+                    NO Odds Multiplier *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1.01"
+                    max="50"
+                    required
+                    value={noOdds}
+                    onChange={e => setNoOdds(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-rose-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
+                  />
                 </div>
               </div>
 
@@ -709,7 +1123,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       {/* EDIT MODAL */}
       {editPred && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-5 space-y-4 text-xs">
+          <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-5 space-y-4 text-xs max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-base text-white flex items-center gap-2">
                 <Edit3 className="w-4 h-4 text-amber-400" />
@@ -740,27 +1154,108 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-300 font-semibold block mb-1">YES Odds:</label>
+                  <label className="text-slate-300 font-semibold block mb-1">Subtitle / Match:</label>
+                  <input
+                    type="text"
+                    value={subtitle}
+                    onChange={e => setSubtitle(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Category:</label>
+                  <select
+                    value={category}
+                    onChange={e => setCategory(e.target.value as PredictionCategory)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none"
+                  >
+                    {CATEGORIES.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {liveCricketMatches.length > 0 && (
+                <div>
+                  <label className="text-emerald-400 font-semibold block mb-1">
+                    Link to Live Cricket Match (Optional):
+                  </label>
+                  <select
+                    value={cricketMatchId}
+                    onChange={e => handleSelectCricketMatch(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none"
+                  >
+                    <option value="">— No live match link —</option>
+                    {liveCricketMatches.map(m => (
+                      <option key={m.id} value={m.id}>
+                        [{m.status === 'in' ? 'LIVE' : m.status === 'pre' ? 'UPCOMING' : 'DONE'}] {m.shortName} · {m.leagueName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-emerald-400 font-semibold block mb-1">YES Odds:</label>
                   <input
                     type="number"
                     step="0.01"
                     min="1.01"
+                    max="50"
+                    required
                     value={yesOdds}
                     onChange={e => setYesOdds(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-rose-400 font-semibold block mb-1">NO Odds:</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="1.01"
+                    max="50"
+                    required
+                    value={noOdds}
+                    onChange={e => setNoOdds(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-rose-500 rounded-xl px-3 py-2 text-white font-mono outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 font-semibold block mb-1">Min Bet (Coins):</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={minBet}
+                    onChange={e => setMinBet(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono outline-none"
                   />
                 </div>
                 <div>
-                  <label className="text-slate-300 font-semibold block mb-1">NO Odds:</label>
+                  <label className="text-slate-300 font-semibold block mb-1">Max Bet (Coins):</label>
                   <input
                     type="number"
-                    step="0.01"
-                    min="1.01"
-                    value={noOdds}
-                    onChange={e => setNoOdds(Number(e.target.value))}
+                    min="10"
+                    value={maxBet}
+                    onChange={e => setMaxBet(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono outline-none"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1">Resolution Criteria / Description:</label>
+                <textarea
+                  rows={2}
+                  value={description}
+                  onChange={e => setDescription(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none"
+                />
               </div>
 
               <div>

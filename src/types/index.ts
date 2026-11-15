@@ -48,7 +48,7 @@ export type PredictionOutcome = 'YES' | 'NO' | 'VOID' | null;
 export interface Prediction {
   id: string;
   title: string;
-  subtitle: string; // e.g. "India vs Australia - 2nd ODI"
+  subtitle: string; // e.g. "India vs Australia - 2nd Test"
   category: PredictionCategory;
   yesOdds: number; // e.g. 1.85 (pays 1.85x)
   noOdds: number; // e.g. 2.10 (pays 2.10x)
@@ -65,6 +65,8 @@ export interface Prediction {
   settledBy?: string;
   iconName?: string;
   description?: string;
+  cricketMatchId?: string;
+  cricketLeagueId?: string;
 }
 
 export type BetResult = 'pending' | 'won' | 'lost' | 'voided';
@@ -86,6 +88,112 @@ export interface Bet {
   settledAt?: string;
   transactionId: string;
   ownerUid?: string;
+}
+
+export interface ParlayLeg {
+  predictionId: string;
+  predictionTitle: string;
+  predictionCategory: PredictionCategory;
+  choice: 'YES' | 'NO';
+  odds: number;
+  status: BetResult;
+  closingTime: string;
+  outcome?: PredictionOutcome;
+}
+
+export interface ParlayBet {
+  id: string;
+  userId: string;
+  ownerUid?: string;
+  username: string;
+  legs: ParlayLeg[];
+  legCount: number;
+  combinedOdds: number;
+  effectiveOdds: number;
+  amount: number;
+  potentialWinnings: number;
+  actualWinnings: number;
+  result: BetResult;
+  createdAt: string;
+  settledAt?: string;
+  transactionId: string;
+}
+
+export interface BuilderSelection {
+  prediction: Prediction;
+  choice: 'YES' | 'NO';
+}
+
+export type LiveCricketStatus = 'in' | 'pre' | 'post';
+
+export interface CricketTeamInfo {
+  id: string;
+  name: string;
+  shortName: string;
+  abbreviation: string;
+  score: string;
+  logo?: string;
+  color?: string;
+  winner: boolean;
+  isBatting: boolean;
+}
+
+export interface LiveCricketMatch {
+  id: string;
+  leagueId: string;
+  leagueName: string;
+  name: string;
+  shortName: string;
+  format: string;
+  status: LiveCricketStatus;
+  statusText: string;
+  statusSummary: string;
+  session?: string;
+  dayNumber?: number;
+  presentLocalTime?: string;
+  venue: string;
+  startTime: string;
+  homeTeam: CricketTeamInfo;
+  awayTeam: CricketTeamInfo;
+  lastUpdatedAt: string;
+}
+
+export interface CricketBatterCard {
+  playerId: string;
+  name: string;
+  dismissal: string;
+  runs: string;
+  balls: string;
+  fours: string;
+  sixes: string;
+  strikeRate: string;
+}
+
+export interface CricketBowlerCard {
+  playerId: string;
+  name: string;
+  overs: string;
+  maidens: string;
+  runs: string;
+  wickets: string;
+  economy: string;
+}
+
+export interface CricketInningsCard {
+  headline: string;
+  total: string;
+  batters?: CricketBatterCard[];
+  bowlers?: CricketBowlerCard[];
+}
+
+export interface LiveCricketDetail {
+  match: LiveCricketMatch;
+  venueCity?: string;
+  venueCountry?: string;
+  tossNote?: string;
+  playerOfTheMatch?: string;
+  matchcards: CricketInningsCard[];
+  fetchedAt: string;
 }
 
 export type TransactionType = 

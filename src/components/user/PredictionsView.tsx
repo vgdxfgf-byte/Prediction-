@@ -9,7 +9,8 @@ import {
   XCircle,
   Trophy,
   Film,
-  Activity
+  Activity,
+  Layers
 } from 'lucide-react';
 import {
   isClosingTimePassed,
@@ -19,6 +20,7 @@ import {
 
 interface PredictionsViewProps {
   onSelectPrediction: (pred: Prediction, choice: 'YES' | 'NO') => void;
+  onOpenBetBuilder?: () => void;
 }
 
 const CATEGORIES: ('All' | PredictionCategory)[] = [
@@ -32,12 +34,25 @@ const CATEGORIES: ('All' | PredictionCategory)[] = [
   'Crypto & Finance'
 ];
 
-export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPrediction }) => {
-  const { predictions, bets, currentUser, nowMs } = useApp();
+export const PredictionsView: React.FC<PredictionsViewProps> = ({
+  onSelectPrediction,
+  onOpenBetBuilder
+}) => {
+  const { predictions, bets, currentUser, nowMs, builderSelections, toggleBuilderLeg } = useApp();
 
   const [selectedCategory, setSelectedCategory] = useState<'All' | PredictionCategory>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'open' | 'paused' | 'settled' | 'all'>('open');
+
+  const builderCombinedOdds = Number(
+    Math.min(
+      100000,
+      builderSelections.reduce(
+        (acc, s) => acc * (s.choice === 'YES' ? s.prediction.yesOdds : s.prediction.noOdds),
+        1
+      )
+    ).toFixed(2)
+  );
 
   // Filter predictions
   const filteredPredictions = predictions.filter(p => {
@@ -173,6 +188,39 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
         </div>
       </div>
 
+      {/* Bet Builder Summary Banner */}
+      {builderSelections.length > 0 && (
+        <div className="p-3.5 rounded-2xl bg-[#0b151a] border border-[#14e071]/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-[#14e071]/15 text-[#14e071] flex items-center justify-center shrink-0">
+              <Layers className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-white">
+                Bet Builder Active · {builderSelections.length}{' '}
+                {builderSelections.length === 1 ? 'Leg' : 'Legs'} Selected
+              </div>
+              <div className="text-[11px] text-slate-400 font-mono-numbers truncate">
+                {builderSelections
+                  .map(s => `${(s.choice === 'YES' ? s.prediction.yesOdds : s.prediction.noOdds).toFixed(2)}x`)
+                  .join(' × ')}{' '}
+                = <strong className="text-[#14e071]">{builderCombinedOdds.toFixed(2)}x</strong>
+              </div>
+            </div>
+          </div>
+
+          {onOpenBetBuilder && (
+            <button
+              type="button"
+              onClick={onOpenBetBuilder}
+              className="px-4 py-2 rounded-xl apex-glow-btn text-xs font-bold shrink-0 cursor-pointer"
+            >
+              Open Bet Builder Slip
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Markets Grid */}
       {filteredPredictions.length === 0 ? (
         <div className="apex-card rounded-2xl p-12 text-center space-y-3">
@@ -303,36 +351,74 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({ onSelectPredic
                   </div>
 
                   {isOpen ? (
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.96 }}
-                        onClick={() => onSelectPrediction(pred, 'YES')}
-                        className="py-2.5 px-3 rounded-xl bg-emerald-950/55 hover:bg-emerald-900/70 border border-[#14e071]/40 hover:border-[#14e071] font-bold text-xs flex items-center justify-between transition cursor-pointer"
-                      >
-                        <div className="flex items-center gap-1.5 text-[#14e071]">
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>YES</span>
-                        </div>
-                        <span className="font-mono-numbers font-extrabold text-white">
-                          {pred.yesOdds.toFixed(2)}x
-                        </span>
-                      </motion.button>
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.96 }}
+                          onClick={() => onSelectPrediction(pred, 'YES')}
+                          className="py-2.5 px-3 rounded-xl border bg-emerald-950/55 hover:bg-emerald-900/70 border-[#14e071]/40 hover:border-[#14e071] font-bold text-xs flex items-center justify-between transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-1.5 text-[#14e071]">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>YES</span>
+                          </div>
+                          <span className="font-mono-numbers font-extrabold text-white">
+                            {pred.yesOdds.toFixed(2)}x
+                          </span>
+                        </motion.button>
 
-                      <motion.button
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.96 }}
-                        onClick={() => onSelectPrediction(pred, 'NO')}
-                        className="py-2.5 px-3 rounded-xl bg-rose-950/45 hover:bg-rose-900/65 border border-rose-500/35 hover:border-rose-400 font-bold text-xs flex items-center justify-between transition cursor-pointer"
-                      >
-                        <div className="flex items-center gap-1.5 text-rose-400">
-                          <XCircle className="w-4 h-4" />
-                          <span>NO</span>
-                        </div>
-                        <span className="font-mono-numbers font-extrabold text-white">
-                          {pred.noOdds.toFixed(2)}x
-                        </span>
-                      </motion.button>
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.96 }}
+                          onClick={() => onSelectPrediction(pred, 'NO')}
+                          className="py-2.5 px-3 rounded-xl bg-rose-950/45 hover:bg-rose-900/65 border border-rose-500/35 hover:border-rose-400 font-bold text-xs flex items-center justify-between transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-1.5 text-rose-400">
+                            <XCircle className="w-4 h-4" />
+                            <span>NO</span>
+                          </div>
+                          <span className="font-mono-numbers font-extrabold text-white">
+                            {pred.noOdds.toFixed(2)}x
+                          </span>
+                        </motion.button>
+                      </div>
+
+                      {(() => {
+                        const builderLeg = builderSelections.find(s => s.prediction.id === pred.id);
+                        return (
+                          <div className="flex items-center justify-between gap-2 pt-1 text-[11px]">
+                            <span className="text-slate-400 flex items-center gap-1">
+                              <Layers className="w-3.5 h-3.5 text-[#14e071]" />
+                              Bet Builder
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => toggleBuilderLeg(pred, 'YES')}
+                                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                                  builderLeg?.choice === 'YES'
+                                    ? 'bg-[#14e071] text-[#04130b]'
+                                    : 'bg-white/[0.06] hover:bg-emerald-500/20 text-slate-200'
+                                }`}
+                              >
+                                {builderLeg?.choice === 'YES' ? '✓ YES' : '+ YES'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleBuilderLeg(pred, 'NO')}
+                                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${
+                                  builderLeg?.choice === 'NO'
+                                    ? 'bg-rose-500 text-white'
+                                    : 'bg-white/[0.06] hover:bg-rose-500/20 text-slate-200'
+                                }`}
+                              >
+                                {builderLeg?.choice === 'NO' ? '✓ NO' : '+ NO'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : (
                     <div className="bg-[#070c10] p-2.5 rounded-xl border border-white/[0.06] text-center">

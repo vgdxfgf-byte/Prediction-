@@ -95,6 +95,20 @@
         "settledBy": { "type": "string", "maxLength": 64 },
         "iconName": { "type": "string", "maxLength": 40 },
         "description": { "type": "string", "maxLength": 1000 },
+        "oddsMode": { "type": "string", "enum": ["manual", "exchange_feed", "amm_pool", "live_cricket"] },
+        "exchangeProvider": { "type": "string", "enum": ["polymarket", "manifold"] },
+        "exchangeMarketId": { "type": "string", "maxLength": 160 },
+        "exchangeMarketQuestion": { "type": "string", "maxLength": 300 },
+        "exchangeMarketUrl": { "type": "string", "maxLength": 500 },
+        "cricketMatchId": { "type": "string", "maxLength": 64 },
+        "cricketLeagueId": { "type": "string", "maxLength": 64 },
+        "cricketMarketKind": { "type": "string", "enum": ["match_winner", "innings_runs", "sixes_over", "session_runs"] },
+        "cricketTargetTeam": { "type": "string", "enum": ["home", "away"] },
+        "cricketLine": { "type": "number" },
+        "cricketMatchState": { "type": "string", "maxLength": 300 },
+        "houseMargin": { "type": "number" },
+        "yesProbability": { "type": "number" },
+        "lastOddsSyncAt": { "type": "string", "maxLength": 64 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -209,6 +223,30 @@
       },
       "required": ["id", "userId", "username", "adminId", "adminUsername", "type", "amount", "previousBalance", "newBalance", "reason", "createdAt"]
     },
+    "ParlayBet": {
+      "title": "ParlayBet",
+      "description": "Multi-leg Bet Builder combo slip with multiplied odds.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "username": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "legs": { "type": "array" },
+        "legCount": { "type": "number" },
+        "combinedOdds": { "type": "number" },
+        "effectiveOdds": { "type": "number" },
+        "amount": { "type": "number" },
+        "potentialWinnings": { "type": "number" },
+        "actualWinnings": { "type": "number" },
+        "result": { "type": "string", "enum": ["pending", "won", "lost", "voided"] },
+        "transactionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "settledAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "ownerUid", "username", "legs", "legCount", "combinedOdds", "effectiveOdds", "amount", "potentialWinnings", "actualWinnings", "result", "transactionId", "createdAt", "updatedAt"]
+    },
     "IdChatThread": {
       "title": "IdChatThread",
       "description": "Live support chat thread between a user/visitor and admin for issuing a new account ID.",
@@ -276,6 +314,10 @@
     "/bets/{betId}": {
       "schema": { "$ref": "#/entities/Bet" },
       "description": "User prediction slips."
+    },
+    "/parlay_bets/{parlayId}": {
+      "schema": { "$ref": "#/entities/ParlayBet" },
+      "description": "Multi-leg Bet Builder combo slips with multiplied odds."
     },
     "/transactions/{txId}": {
       "schema": { "$ref": "#/entities/Transaction" },

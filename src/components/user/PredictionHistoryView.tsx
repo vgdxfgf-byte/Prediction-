@@ -12,19 +12,22 @@ import {
   TrendingDown,
   CheckCircle2,
   Film,
-  Activity
+  Activity,
+  Layers
 } from 'lucide-react';
 
 type HistoryFilter = 'all' | 'settled' | 'pending' | 'won' | 'lost' | 'voided';
+type SlipKindFilter = 'all' | 'singles' | 'parlays';
 
 interface PredictionHistoryViewProps {
   onGoToMarkets?: () => void;
 }
 
 export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ onGoToMarkets }) => {
-  const { bets, predictions, currentUser } = useApp();
+  const { bets, parlayBets, predictions, currentUser } = useApp();
 
   const [activeTab, setActiveTab] = useState<HistoryFilter>('all');
+  const [slipKindFilter, setSlipKindFilter] = useState<SlipKindFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   const predictionById = useMemo(
@@ -37,40 +40,82 @@ export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ on
   const userBets = bets.filter(
     b => b.userId === currentUser.id || (b.ownerUid && currentUser.ownerUid && b.ownerUid === currentUser.ownerUid)
   );
+  const userParlays = parlayBets.filter(
+    p => p.userId === currentUser.id || (p.ownerUid && currentUser.ownerUid && p.ownerUid === currentUser.ownerUid)
+  );
+
   const settledBets = userBets.filter(b => b.result !== 'pending');
   const wonBets = userBets.filter(b => b.result === 'won');
   const lostBets = userBets.filter(b => b.result === 'lost');
   const voidedBets = userBets.filter(b => b.result === 'voided');
   const pendingBets = userBets.filter(b => b.result === 'pending');
 
-  const filteredBets = userBets.filter(b => {
-    if (activeTab === 'settled' && b.result === 'pending') return false;
-    if (activeTab !== 'all' && activeTab !== 'settled' && b.result !== activeTab) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchTitle = b.predictionTitle.toLowerCase().includes(q);
-      const matchCat = b.predictionCategory.toLowerCase().includes(q);
-      const matchTx = b.transactionId.toLowerCase().includes(q);
-      const matchPick = b.choice.toLowerCase().includes(q);
-      if (!matchTitle && !matchCat && !matchTx && !matchPick) return false;
-    }
-    return true;
-  });
+  const settledParlays = userParlays.filter(p => p.result !== 'pending');
+  const wonParlays = userParlays.filter(p => p.result === 'won');
+  const lostParlays = userParlays.filter(p => p.result === 'lost');
+  const voidedParlays = userParlays.filter(p => p.result === 'voided');
+  const pendingParlays = userParlays.filter(p => p.result === 'pending');
 
-  const wonTotal = wonBets.reduce((sum, b) => sum + b.actualWinnings, 0);
-  const investedTotal = userBets.reduce((sum, b) => sum + b.amount, 0);
-  const settledStakedTotal = wonBets.reduce((sum, b) => sum + b.amount, 0) + lostBets.reduce((sum, b) => sum + b.amount, 0);
+  const filteredBets =
+    slipKindFilter === 'parlays'
+      ? []
+      : userBets.filter(b => {
+          if (activeTab === 'settled' && b.result === 'pending') return false;
+          if (activeTab !== 'all' && activeTab !== 'settled' && b.result !== activeTab) return false;
+          if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            const matchTitle = b.predictionTitle.toLowerCase().includes(q);
+            const matchCat = b.predictionCategory.toLowerCase().includes(q);
+            const matchTx = b.transactionId.toLowerCase().includes(q);
+            const matchPick = b.choice.toLowerCase().includes(q);
+            if (!matchTitle && !matchCat && !matchTx && !matchPick) return false;
+          }
+          return true;
+        });
+
+  const filteredParlays =
+    slipKindFilter === 'singles'
+      ? []
+      : userParlays.filter(p => {
+          if (activeTab === 'settled' && p.result === 'pending') return false;
+          if (activeTab !== 'all' && activeTab !== 'settled' && p.result !== activeTab) return false;
+          if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            const matchLeg = p.legs.some(
+              l =>
+                l.predictionTitle.toLowerCase().includes(q) ||
+                l.predictionCategory.toLowerCase().includes(q)
+            );
+            const matchTx = p.transactionId.toLowerCase().includes(q) || p.id.toLowerCase().includes(q);
+            if (!matchLeg && !matchTx) return false;
+          }
+          return true;
+        });
+
+  const wonTotal =
+    wonBets.reduce((sum, b) => sum + b.actualWinnings, 0) +
+    wonParlays.reduce((sum, p) => sum + p.actualWinnings, 0);
+  const investedTotal =
+    userBets.reduce((sum, b) => sum + b.amount, 0) +
+    userParlays.reduce((sum, p) => sum + p.amount, 0);
+  const settledStakedTotal =
+    wonBets.reduce((sum, b) => sum + b.amount, 0) +
+    lostBets.reduce((sum, b) => sum + b.amount, 0) +
+    wonParlays.reduce((sum, p) => sum + p.amount, 0) +
+    lostParlays.reduce((sum, p) => sum + p.amount, 0);
   const netProfit = wonTotal - settledStakedTotal;
-  const decidedCount = wonBets.length + lostBets.length;
-  const winRate = decidedCount > 0 ? Math.round((wonBets.length / decidedCount) * 100) : 0;
+  const totalWonCount = wonBets.length + wonParlays.length;
+  const totalLostCount = lostBets.length + lostParlays.length;
+  const decidedCount = totalWonCount + totalLostCount;
+  const winRate = decidedCount > 0 ? Math.round((totalWonCount / decidedCount) * 100) : 0;
 
   const filterTabs: { id: HistoryFilter; label: string; count: number }[] = [
-    { id: 'all', label: 'All Bets', count: userBets.length },
-    { id: 'settled', label: 'Results', count: settledBets.length },
-    { id: 'pending', label: 'Pending', count: pendingBets.length },
-    { id: 'won', label: 'Won', count: wonBets.length },
-    { id: 'lost', label: 'Lost', count: lostBets.length },
-    { id: 'voided', label: 'Voided', count: voidedBets.length }
+    { id: 'all', label: 'All Bets', count: userBets.length + userParlays.length },
+    { id: 'settled', label: 'Results', count: settledBets.length + settledParlays.length },
+    { id: 'pending', label: 'Pending', count: pendingBets.length + pendingParlays.length },
+    { id: 'won', label: 'Won', count: totalWonCount },
+    { id: 'lost', label: 'Lost', count: totalLostCount },
+    { id: 'voided', label: 'Voided', count: voidedBets.length + voidedParlays.length }
   ];
 
   return (
@@ -82,12 +127,35 @@ export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ on
             <Trophy className="w-5 h-5 text-[#14e071]" />
             <span>Bet Results &amp; History</span>
             <span className="px-2.5 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-slate-300 text-xs font-semibold font-mono-numbers">
-              {userBets.length} Total
+              {userBets.length + userParlays.length} Total
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Track settled market outcomes, winning payouts, refunds, and active picks in real time.
+            Track settled market outcomes, Bet Builder combos, winning payouts, and active picks in real time.
           </p>
+        </div>
+
+        <div className="flex items-center gap-1 bg-[#0b1318] p-1 rounded-xl border border-white/[0.08] text-xs">
+          {(
+            [
+              { id: 'all', label: 'All Slips' },
+              { id: 'singles', label: `Singles (${userBets.length})` },
+              { id: 'parlays', label: `Bet Builder (${userParlays.length})` }
+            ] as { id: SlipKindFilter; label: string }[]
+          ).map(k => (
+            <button
+              key={k.id}
+              type="button"
+              onClick={() => setSlipKindFilter(k.id)}
+              className={`px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap transition cursor-pointer ${
+                slipKindFilter === k.id
+                  ? 'bg-[#14e071] text-[#04130b] font-bold'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {k.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -98,7 +166,9 @@ export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ on
           <div className="mt-1 font-mono-numbers text-lg font-black text-white">
             {investedTotal.toLocaleString()}
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">{pendingBets.length} active pending</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            {pendingBets.length + pendingParlays.length} active pending
+          </div>
         </div>
 
         <div className="apex-card rounded-xl p-3.5">
@@ -106,7 +176,7 @@ export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ on
           <div className="mt-1 font-mono-numbers text-lg font-black text-[#14e071]">
             +{wonTotal.toLocaleString()}
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">{wonBets.length} winning slips</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">{totalWonCount} winning slips</div>
         </div>
 
         <div className="apex-card rounded-xl p-3.5">
@@ -126,7 +196,9 @@ export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ on
               {netProfit.toLocaleString()}
             </span>
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">{lostBets.length} lost · {voidedBets.length} voided</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            {totalLostCount} lost · {voidedBets.length + voidedParlays.length} voided
+          </div>
         </div>
 
         <div className="apex-card rounded-xl p-3.5">
@@ -135,7 +207,7 @@ export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ on
             {decidedCount > 0 ? `${winRate}%` : '—'}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">
-            {wonBets.length}W / {lostBets.length}L decided
+            {totalWonCount}W / {totalLostCount}L decided
           </div>
         </div>
       </div>
@@ -182,17 +254,17 @@ export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ on
         </div>
       </div>
 
-      {/* Bets List */}
-      {filteredBets.length === 0 ? (
+      {/* Bets List (Bet Builder Combos + Singles) */}
+      {filteredBets.length === 0 && filteredParlays.length === 0 ? (
         <div className="apex-card rounded-2xl p-12 text-center space-y-3">
           <Clock className="w-10 h-10 text-slate-600 mx-auto" />
           <h3 className="font-bold text-slate-200 text-sm">No Bet Records Found</h3>
           <p className="text-xs text-slate-400">
-            {userBets.length === 0
-              ? 'You have not placed any predictions yet. Place a YES/NO pick to see your slips and results here.'
+            {userBets.length === 0 && userParlays.length === 0
+              ? 'You have not placed any predictions yet. Place a YES/NO pick or Bet Builder combo to see your slips here.'
               : `No predictions found under the “${activeTab}” filter.`}
           </p>
-          {userBets.length === 0 && onGoToMarkets && (
+          {userBets.length === 0 && userParlays.length === 0 && onGoToMarkets && (
             <button
               type="button"
               onClick={onGoToMarkets}
@@ -204,6 +276,154 @@ export const PredictionHistoryView: React.FC<PredictionHistoryViewProps> = ({ on
         </div>
       ) : (
         <div className="space-y-3">
+          {/* Bet Builder Combo Slips */}
+          {filteredParlays.map((pb, idx) => {
+            const placedDate = new Date(pb.createdAt);
+            const settledDate = pb.settledAt ? new Date(pb.settledAt) : null;
+            const isWon = pb.result === 'won';
+            const isLost = pb.result === 'lost';
+            const isPending = pb.result === 'pending';
+            const isVoided = pb.result === 'voided';
+            const netDelta = isWon ? pb.actualWinnings - pb.amount : isLost ? -pb.amount : 0;
+
+            return (
+              <motion.div
+                key={pb.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.16, delay: Math.min(idx * 0.03, 0.2) }}
+                className={`apex-card rounded-2xl p-4 sm:p-5 space-y-3 transition ${
+                  isWon
+                    ? 'border-[#14e071]/40'
+                    : isLost
+                      ? 'border-rose-500/25'
+                      : 'border-[#14e071]/20'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-[#14e071] flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5" />
+                      Bet Builder ({pb.legCount} Legs)
+                    </span>
+                    <span className="text-slate-400 text-[11px]">
+                      · Placed {placedDate.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} at{' '}
+                      {placedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {settledDate && (
+                      <span className="text-slate-500 text-[11px]">
+                        · Settled {settledDate.toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    {isPending && (
+                      <span className="text-sky-400 text-xs font-bold flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        Pending Result
+                      </span>
+                    )}
+                    {isWon && (
+                      <span className="text-[#14e071] text-xs font-bold flex items-center gap-1">
+                        <Trophy className="w-3.5 h-3.5" />
+                        Won +{pb.actualWinnings.toLocaleString()} Coins
+                      </span>
+                    )}
+                    {isLost && (
+                      <span className="text-rose-400 text-xs font-bold flex items-center gap-1">
+                        <XCircle className="w-3.5 h-3.5" />
+                        Lost (-{pb.amount.toLocaleString()})
+                      </span>
+                    )}
+                    {isVoided && (
+                      <span className="text-slate-300 text-xs font-bold flex items-center gap-1">
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Voided · Refunded +{pb.actualWinnings.toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Legs Breakdown */}
+                <div className="space-y-1.5 bg-[#070c10] p-3 rounded-xl border border-white/[0.06]">
+                  {pb.legs.map((leg, legIdx) => (
+                    <div
+                      key={`${pb.id}-${leg.predictionId}-${legIdx}`}
+                      className="flex items-center justify-between gap-3 text-xs py-1 border-b border-white/[0.04] last:border-b-0"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-slate-200 font-semibold truncate">
+                          {legIdx + 1}. {leg.predictionTitle}
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {leg.predictionCategory} · Pick{' '}
+                          <span className={leg.choice === 'YES' ? 'text-[#14e071] font-bold' : 'text-rose-400 font-bold'}>
+                            {leg.choice}
+                          </span>{' '}
+                          @ <span className="font-mono-numbers text-slate-300">{leg.odds.toFixed(2)}x</span>
+                        </div>
+                      </div>
+                      <span
+                        className={`text-[11px] font-bold uppercase shrink-0 ${
+                          leg.status === 'won'
+                            ? 'text-[#14e071]'
+                            : leg.status === 'lost'
+                              ? 'text-rose-400'
+                              : leg.status === 'voided'
+                                ? 'text-slate-400'
+                                : 'text-sky-400'
+                        }`}
+                      >
+                        {leg.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Combo Totals Row */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 bg-[#070c10] p-3 rounded-xl border border-white/[0.06] text-xs">
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Multiplied Odds</span>
+                    <span className="font-mono-numbers font-black text-[#14e071]">
+                      {pb.effectiveOdds.toFixed(2)}x
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Staked</span>
+                    <span className="font-mono-numbers font-bold text-white">
+                      {pb.amount.toLocaleString()} coins
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Payout</span>
+                    <span className={`font-mono-numbers font-black ${isWon ? 'text-[#14e071]' : isLost ? 'text-slate-500' : 'text-sky-400'}`}>
+                      {isWon
+                        ? `+${pb.actualWinnings.toLocaleString()}`
+                        : isVoided
+                          ? `+${pb.actualWinnings.toLocaleString()}`
+                          : isLost
+                            ? '0'
+                            : `Est. ${pb.potentialWinnings.toLocaleString()}`}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Net P&amp;L</span>
+                    <span className={`font-mono-numbers font-bold ${isWon ? 'text-[#14e071]' : isLost ? 'text-rose-400' : 'text-slate-400'}`}>
+                      {isWon ? `+${netDelta.toLocaleString()}` : isLost ? `${netDelta.toLocaleString()}` : isVoided ? '0' : 'Pending'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px] uppercase font-bold">Slip ID</span>
+                    <span className="font-mono-numbers text-slate-400 text-[10px] truncate block" title={pb.id}>
+                      {pb.id}
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+
           {filteredBets.map((bet, idx) => {
             const date = new Date(bet.createdAt);
             const settledDate = bet.settledAt ? new Date(bet.settledAt) : null;

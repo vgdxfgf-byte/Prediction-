@@ -102,7 +102,7 @@ service cloud.firestore {
 
     function isValidPrediction(data) {
       return data.keys().hasAll(['id', 'title', 'subtitle', 'category', 'yesOdds', 'noOdds', 'minBet', 'maxBet', 'closingTime', 'status', 'totalYesVolume', 'totalNoVolume', 'totalParticipants', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'title', 'subtitle', 'category', 'yesOdds', 'noOdds', 'minBet', 'maxBet', 'closingTime', 'status', 'outcome', 'totalYesVolume', 'totalNoVolume', 'totalParticipants', 'settledAt', 'settledBy', 'iconName', 'description', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'title', 'subtitle', 'category', 'yesOdds', 'noOdds', 'minBet', 'maxBet', 'closingTime', 'status', 'outcome', 'totalYesVolume', 'totalNoVolume', 'totalParticipants', 'settledAt', 'settledBy', 'iconName', 'description', 'oddsMode', 'exchangeProvider', 'exchangeMarketId', 'exchangeMarketQuestion', 'exchangeMarketUrl', 'cricketMatchId', 'cricketLeagueId', 'cricketMarketKind', 'cricketTargetTeam', 'cricketLine', 'cricketMatchState', 'houseMargin', 'yesProbability', 'lastOddsSyncAt', 'createdAt', 'updatedAt']) &&
         isValidId(data.id) &&
         data.title is string && data.title.size() >= 3 && data.title.size() <= 240 &&
         data.subtitle is string && data.subtitle.size() >= 1 && data.subtitle.size() <= 200 &&
@@ -121,6 +121,20 @@ service cloud.firestore {
         isOptionalString(data, 'settledBy', 64) &&
         isOptionalString(data, 'iconName', 40) &&
         isOptionalString(data, 'description', 1000) &&
+        (!('oddsMode' in data) || data.oddsMode == null || data.oddsMode in ['manual', 'exchange_feed', 'amm_pool', 'live_cricket']) &&
+        (!('exchangeProvider' in data) || data.exchangeProvider == null || data.exchangeProvider in ['polymarket', 'manifold']) &&
+        isOptionalString(data, 'exchangeMarketId', 160) &&
+        isOptionalString(data, 'exchangeMarketQuestion', 300) &&
+        isOptionalString(data, 'exchangeMarketUrl', 500) &&
+        isOptionalString(data, 'cricketMatchId', 64) &&
+        isOptionalString(data, 'cricketLeagueId', 64) &&
+        (!('cricketMarketKind' in data) || data.cricketMarketKind == null || data.cricketMarketKind in ['match_winner', 'innings_runs', 'sixes_over', 'session_runs']) &&
+        (!('cricketTargetTeam' in data) || data.cricketTargetTeam == null || data.cricketTargetTeam in ['home', 'away']) &&
+        (!('cricketLine' in data) || data.cricketLine == null || (data.cricketLine is number && data.cricketLine >= 0 && data.cricketLine <= 5000)) &&
+        isOptionalString(data, 'cricketMatchState', 300) &&
+        (!('houseMargin' in data) || data.houseMargin == null || (data.houseMargin is number && data.houseMargin >= 0 && data.houseMargin <= 0.25)) &&
+        (!('yesProbability' in data) || data.yesProbability == null || (data.yesProbability is number && data.yesProbability >= 0 && data.yesProbability <= 1)) &&
+        isOptionalString(data, 'lastOddsSyncAt', 64) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -136,7 +150,28 @@ service cloud.firestore {
         data.predictionTitle is string && data.predictionTitle.size() >= 1 && data.predictionTitle.size() <= 240 &&
         data.predictionCategory in ['Cricket', 'Movies', 'Football', 'Basketball', 'Tennis', 'Esports', 'Crypto & Finance'] &&
         data.choice in ['YES', 'NO'] &&
-        data.odds is number && data.odds >= 1 &&
+        data.odds is number && data.odds >= 1 && data.odds <= 100 &&
+        data.amount is number && data.amount > 0 &&
+        data.potentialWinnings is number && data.potentialWinnings >= data.amount &&
+        data.actualWinnings is number && data.actualWinnings >= 0 &&
+        data.result in ['pending', 'won', 'lost', 'voided'] &&
+        isValidId(data.transactionId) &&
+        isOptionalString(data, 'settledAt', 64) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidParlayBet(data) {
+      return data.keys().hasAll(['id', 'userId', 'ownerUid', 'username', 'legs', 'legCount', 'combinedOdds', 'effectiveOdds', 'amount', 'potentialWinnings', 'actualWinnings', 'result', 'transactionId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'ownerUid', 'username', 'legs', 'legCount', 'combinedOdds', 'effectiveOdds', 'amount', 'potentialWinnings', 'actualWinnings', 'result', 'transactionId', 'settledAt', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        isValidId(data.ownerUid) &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 64 &&
+        data.legs is list && data.legs.size() >= 2 && data.legs.size() <= 10 && data.legs[0] is map &&
+        data.legCount is number && data.legCount == data.legs.size() &&
+        data.combinedOdds is number && data.combinedOdds > 1 && data.combinedOdds <= 100000 &&
+        data.effectiveOdds is number && data.effectiveOdds >= 1 && data.effectiveOdds <= 100000 &&
         data.amount is number && data.amount > 0 &&
         data.potentialWinnings is number && data.potentialWinnings >= data.amount &&
         data.actualWinnings is number && data.actualWinnings >= 0 &&
@@ -321,7 +356,8 @@ service cloud.firestore {
     match /predictions/{predictionId} {
       allow get: if isValidId(predictionId);
       allow list: if true;
-      allow create: if isAdmin() && isValidId(predictionId) && isValidPrediction(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow create: if isAdmin() && isValidId(predictionId) && isValidPrediction(incoming()) &&
+        incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(predictionId) && isValidPrediction(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
         isAdmin() ||
         (isAuthenticatedAppUser() && existing().status == 'open' &&
@@ -350,6 +386,21 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/predictions/$(incoming().predictionId));
       allow update: if isAdmin() && isValidId(betId) && isValidBet(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
       allow delete: if isAdmin() && isValidId(betId);
+    }
+
+    match /parlay_bets/{parlayId} {
+      allow get: if isValidId(parlayId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
+      allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isAuthenticatedAppUser() && isValidId(parlayId) && isValidParlayBet(incoming()) &&
+        incoming().ownerUid == request.auth.uid &&
+        incoming().result == 'pending' &&
+        incoming().actualWinnings == 0 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid &&
+        get(/databases/$(database)/documents/users/$(incoming().userId)).data.status == 'active';
+      allow update: if isAdmin() && isValidId(parlayId) && isValidParlayBet(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time;
+      allow delete: if isAdmin() && isValidId(parlayId);
     }
 
     match /transactions/{txId} {

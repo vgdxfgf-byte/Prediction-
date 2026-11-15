@@ -30,6 +30,8 @@ import type {
   User,
   Prediction,
   Bet,
+  ParlayBet,
+  ParlayLeg,
   Transaction,
   DepositRequest,
   WithdrawalRequest,
@@ -111,7 +113,9 @@ function mapPredictionDoc(id: string, data: Record<string, unknown>): Prediction
     settledAt: data.settledAt ? String(data.settledAt) : undefined,
     settledBy: data.settledBy ? String(data.settledBy) : undefined,
     iconName: data.iconName ? String(data.iconName) : undefined,
-    description: data.description ? String(data.description) : undefined
+    description: data.description ? String(data.description) : undefined,
+    cricketMatchId: data.cricketMatchId ? String(data.cricketMatchId) : undefined,
+    cricketLeagueId: data.cricketLeagueId ? String(data.cricketLeagueId) : undefined
   };
 }
 
@@ -133,6 +137,41 @@ function mapBetDoc(id: string, data: Record<string, unknown>): Bet {
     settledAt: data.settledAt ? String(data.settledAt) : undefined,
     transactionId: String(data.transactionId || ''),
     ownerUid: data.ownerUid ? String(data.ownerUid) : undefined
+  };
+}
+
+function mapParlayBetDoc(id: string, data: Record<string, unknown>): ParlayBet {
+  const rawLegs = Array.isArray(data.legs) ? data.legs : [];
+  const legs: ParlayLeg[] = rawLegs.map(item => {
+    const l = (item || {}) as Record<string, unknown>;
+    return {
+      predictionId: String(l.predictionId || ''),
+      predictionTitle: String(l.predictionTitle || ''),
+      predictionCategory: (l.predictionCategory as ParlayLeg['predictionCategory']) || 'Cricket',
+      choice: l.choice === 'NO' ? 'NO' : 'YES',
+      odds: Number(l.odds ?? 1),
+      status: (l.status as ParlayLeg['status']) || 'pending',
+      closingTime: String(l.closingTime || ''),
+      outcome: (l.outcome as ParlayLeg['outcome']) ?? null
+    };
+  });
+
+  return {
+    id: String(data.id || id),
+    userId: String(data.userId || ''),
+    ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
+    username: String(data.username || ''),
+    legs,
+    legCount: Number(data.legCount ?? legs.length),
+    combinedOdds: Number(data.combinedOdds ?? 1),
+    effectiveOdds: Number(data.effectiveOdds ?? data.combinedOdds ?? 1),
+    amount: Number(data.amount ?? 0),
+    potentialWinnings: Number(data.potentialWinnings ?? 0),
+    actualWinnings: Number(data.actualWinnings ?? 0),
+    result: (data.result as ParlayBet['result']) || 'pending',
+    createdAt: toIso(data.createdAt),
+    settledAt: data.settledAt ? String(data.settledAt) : undefined,
+    transactionId: String(data.transactionId || '')
   };
 }
 
@@ -575,6 +614,7 @@ export function subscribeUserPortalData(
   handlers: {
     onUser: (user: User | null) => void;
     onBets: (bets: Bet[]) => void;
+    onParlayBets?: (parlays: ParlayBet[]) => void;
     onTransactions: (txs: Transaction[]) => void;
     onDeposits: (deps: DepositRequest[]) => void;
     onWithdrawals: (wdrs: WithdrawalRequest[]) => void;
@@ -617,6 +657,20 @@ export function subscribeUserPortalData(
       error => reportListenerError(error, OperationType.LIST, 'bets')
     )
   );
+
+  if (handlers.onParlayBets) {
+    unsubs.push(
+      onSnapshot(
+        query(collection(db, 'parlay_bets'), where('ownerUid', '==', authUid)),
+        snap => {
+          handlers.onParlayBets?.(
+            snap.docs.map(d => mapParlayBetDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          );
+        },
+        error => reportListenerError(error, OperationType.LIST, 'parlay_bets')
+      )
+    );
+  }
 
   unsubs.push(
     onSnapshot(
@@ -680,6 +734,7 @@ export function subscribeUserPortalData(
 export function subscribeAdminPortalData(handlers: {
   onUsers: (users: User[]) => void;
   onBets: (bets: Bet[]) => void;
+  onParlayBets?: (parlays: ParlayBet[]) => void;
   onTransactions: (txs: Transaction[]) => void;
   onDeposits: (deps: DepositRequest[]) => void;
   onWithdrawals: (wdrs: WithdrawalRequest[]) => void;
@@ -712,6 +767,20 @@ export function subscribeAdminPortalData(handlers: {
       error => handleFirestoreError(error, OperationType.LIST, 'bets')
     )
   );
+
+  if (handlers.onParlayBets) {
+    unsubs.push(
+      onSnapshot(
+        collection(db, 'parlay_bets'),
+        snap => {
+          handlers.onParlayBets?.(
+            snap.docs.map(d => mapParlayBetDoc(d.id, d.data())).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          );
+        },
+        error => handleFirestoreError(error, OperationType.LIST, 'parlay_bets')
+      )
+    );
+  }
 
   unsubs.push(
     onSnapshot(
@@ -806,7 +875,7 @@ export async function fsPlaceBet(
   prediction: Prediction,
   choice: 'YES' | 'NO',
   amount: number
-): Promise<{ success: boolean; error?: string; betId?: string }> {
+): Promise<{ success: boolean; error?: string; betId?: string; lockedOdds?: number; lockedPayout?: number }> {
   if (prediction.status !== 'open') return { success: false, error: 'Betting is paused — market is not open' };
   if (isClosingTimePassed(prediction.closingTime)) {
     return { success: false, error: 'Betting is automatically paused — market closing date & time has passed' };
@@ -835,7 +904,11 @@ export async function fsPlaceBet(
     return { success: false, error: 'Betting is automatically paused — market closing date & time has passed' };
   }
 
+  const nextYesVol = choice === 'YES' ? livePred.totalYesVolume + amount : livePred.totalYesVolume;
+  const nextNoVol = choice === 'NO' ? livePred.totalNoVolume + amount : livePred.totalNoVolume;
+
   const odds = choice === 'YES' ? livePred.yesOdds : livePred.noOdds;
+
   const betId = createUniqueTxId('bet');
   const txId = createUniqueTxId('tx');
   const newBalance = user.coins - amount;
@@ -879,18 +952,160 @@ export async function fsPlaceBet(
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
+
   batch.update(doc(db, 'predictions', livePred.id), {
-    totalYesVolume: choice === 'YES' ? livePred.totalYesVolume + amount : livePred.totalYesVolume,
-    totalNoVolume: choice === 'NO' ? livePred.totalNoVolume + amount : livePred.totalNoVolume,
+    totalYesVolume: nextYesVol,
+    totalNoVolume: nextNoVol,
     totalParticipants: livePred.totalParticipants + 1,
     updatedAt: serverTimestamp()
   });
 
   try {
     await batch.commit();
-    return { success: true, betId };
+    return { success: true, betId, lockedOdds: odds, lockedPayout: potentialWinnings };
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `bets/${betId}`);
+  }
+}
+
+export async function fsPlaceParlayBet(
+  authUid: string,
+  user: User,
+  selections: { prediction: Prediction; choice: 'YES' | 'NO' }[],
+  amount: number
+): Promise<{
+  success: boolean;
+  error?: string;
+  parlayId?: string;
+  combinedOdds?: number;
+  potentialWinnings?: number;
+}> {
+  if (selections.length < 2) {
+    return { success: false, error: 'Add at least 2 predictions to place a Bet Builder combo' };
+  }
+  if (selections.length > 10) {
+    return { success: false, error: 'Bet Builder supports up to 10 predictions per slip' };
+  }
+  const uniqueIds = new Set(selections.map(s => s.prediction.id));
+  if (uniqueIds.size !== selections.length) {
+    return { success: false, error: 'Each market can only be selected once per Bet Builder slip' };
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { success: false, error: 'Enter a valid coin stake' };
+  }
+  if (user.coins < amount) {
+    return { success: false, error: 'Insufficient coin balance' };
+  }
+
+  // Re-verify all selected markets live from Firestore
+  const livePreds: { pred: Prediction; choice: 'YES' | 'NO' }[] = [];
+  for (const sel of selections) {
+    let snap;
+    try {
+      snap = await getDoc(doc(db, 'predictions', sel.prediction.id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, `predictions/${sel.prediction.id}`);
+    }
+    if (!snap.exists()) {
+      return { success: false, error: `"${sel.prediction.title}" is no longer available` };
+    }
+    const livePred = mapPredictionDoc(snap.id, snap.data());
+    if (livePred.status !== 'open') {
+      return { success: false, error: `"${livePred.title}" is currently paused or closed` };
+    }
+    if (isClosingTimePassed(livePred.closingTime)) {
+      return { success: false, error: `"${livePred.title}" closing time has passed` };
+    }
+    livePreds.push({ pred: livePred, choice: sel.choice });
+  }
+
+  const requiredMin = Math.max(...livePreds.map(item => item.pred.minBet));
+  const allowedMax = Math.min(...livePreds.map(item => item.pred.maxBet));
+  if (amount < requiredMin) {
+    return { success: false, error: `Minimum Bet Builder stake for selected markets is ${requiredMin} coins` };
+  }
+  if (allowedMax >= requiredMin && amount > allowedMax) {
+    return { success: false, error: `Maximum Bet Builder stake for selected markets is ${allowedMax} coins` };
+  }
+
+  const lockedLegs: ParlayLeg[] = livePreds.map(({ pred, choice }) => ({
+    predictionId: pred.id,
+    predictionTitle: pred.title.slice(0, 240),
+    predictionCategory: pred.category,
+    choice,
+    odds: choice === 'YES' ? pred.yesOdds : pred.noOdds,
+    status: 'pending',
+    closingTime: pred.closingTime,
+    outcome: null
+  }));
+
+  const rawProduct = lockedLegs.reduce((acc, l) => acc * l.odds, 1);
+  const combinedOdds = Number(Math.min(100000, Math.max(1.01, rawProduct)).toFixed(2));
+  const potentialWinnings = Math.round(amount * combinedOdds);
+  const newBalance = user.coins - amount;
+  const parlayId = createUniqueTxId('parlay');
+  const txId = createUniqueTxId('tx');
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'users', user.id), {
+    coins: newBalance,
+    updatedAt: serverTimestamp()
+  });
+
+  batch.set(doc(db, 'parlay_bets', parlayId), {
+    id: parlayId,
+    userId: user.id,
+    ownerUid: authUid,
+    username: user.username,
+    legs: lockedLegs,
+    legCount: lockedLegs.length,
+    combinedOdds,
+    effectiveOdds: combinedOdds,
+    amount,
+    potentialWinnings,
+    actualWinnings: 0,
+    result: 'pending',
+    transactionId: txId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  batch.set(doc(db, 'transactions', txId), {
+    id: txId,
+    userId: user.id,
+    ownerUid: authUid,
+    username: user.username,
+    type: 'bet_placed',
+    amount: -amount,
+    balanceBefore: user.coins,
+    balanceAfter: newBalance,
+    status: 'completed',
+    description: `Bet Builder (${lockedLegs.length} legs @ ${combinedOdds.toFixed(2)}x)`.slice(0, 300),
+    referenceId: parlayId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  const legVolumeShare = Math.max(1, Math.round(amount / lockedLegs.length));
+  for (const { pred, choice } of livePreds) {
+    batch.update(doc(db, 'predictions', pred.id), {
+      totalYesVolume: choice === 'YES' ? pred.totalYesVolume + legVolumeShare : pred.totalYesVolume,
+      totalNoVolume: choice === 'NO' ? pred.totalNoVolume + legVolumeShare : pred.totalNoVolume,
+      totalParticipants: pred.totalParticipants + 1,
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  try {
+    await batch.commit();
+    return {
+      success: true,
+      parlayId,
+      combinedOdds,
+      potentialWinnings
+    };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `parlay_bets/${parlayId}`);
   }
 }
 
@@ -1371,7 +1586,7 @@ export async function fsCreatePrediction(
   data: Omit<Prediction, 'id' | 'createdAt' | 'totalYesVolume' | 'totalNoVolume' | 'totalParticipants' | 'outcome'>
 ): Promise<{ success: boolean; error?: string; prediction?: Prediction }> {
   const id = `pred_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-  const payload = {
+  const payload: Record<string, unknown> = {
     id,
     title: data.title.trim().slice(0, 240),
     subtitle: data.subtitle.trim().slice(0, 200),
@@ -1388,6 +1603,8 @@ export async function fsCreatePrediction(
     totalParticipants: 0,
     iconName: data.iconName || 'trophy',
     description: data.description ? data.description.slice(0, 1000) : '',
+    ...(data.cricketMatchId ? { cricketMatchId: data.cricketMatchId.slice(0, 64) } : {}),
+    ...(data.cricketLeagueId ? { cricketLeagueId: data.cricketLeagueId.slice(0, 64) } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   };
@@ -1423,6 +1640,8 @@ export async function fsUpdatePrediction(id: string, data: Partial<Prediction>):
   if (typeof data.closingTime === 'string') updates.closingTime = data.closingTime;
   if (typeof data.description === 'string') updates.description = data.description.slice(0, 1000);
   if (data.status) updates.status = data.status;
+  if (data.cricketMatchId !== undefined) updates.cricketMatchId = data.cricketMatchId ? data.cricketMatchId.slice(0, 64) : null;
+  if (data.cricketLeagueId !== undefined) updates.cricketLeagueId = data.cricketLeagueId ? data.cricketLeagueId.slice(0, 64) : null;
 
   try {
     await updateDoc(doc(db, 'predictions', id), updates);
@@ -1430,6 +1649,135 @@ export async function fsUpdatePrediction(id: string, data: Partial<Prediction>):
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `predictions/${id}`);
   }
+}
+
+async function applyMarketResolutionToParlays(
+  predictionId: string,
+  outcome: 'YES' | 'NO' | 'VOID',
+  nowIso: string,
+  userCoins: Map<string, number>,
+  userOwnerUids: Map<string, string>,
+  ops: BatchWriteOp[]
+): Promise<{ parlayWinnersCount: number; parlayPayout: number }> {
+  let parlayWinnersCount = 0;
+  let parlayPayout = 0;
+
+  let pendingSnap;
+  try {
+    pendingSnap = await getDocs(query(collection(db, 'parlay_bets'), where('result', '==', 'pending')));
+  } catch {
+    return { parlayWinnersCount: 0, parlayPayout: 0 };
+  }
+
+  for (const pDoc of pendingSnap.docs) {
+    const parlay = mapParlayBetDoc(pDoc.id, pDoc.data());
+    const hasLeg = parlay.legs.some(l => l.predictionId === predictionId && l.status === 'pending');
+    if (!hasLeg) continue;
+
+    const updatedLegs = parlay.legs.map(l => {
+      if (l.predictionId !== predictionId || l.status !== 'pending') return l;
+      const legStatus: ParlayLeg['status'] =
+        outcome === 'VOID' ? 'voided' : l.choice === outcome ? 'won' : 'lost';
+      return {
+        ...l,
+        status: legStatus,
+        outcome
+      };
+    });
+
+    const hasLost = updatedLegs.some(l => l.status === 'lost');
+    const hasPending = updatedLegs.some(l => l.status === 'pending');
+    const wonLegs = updatedLegs.filter(l => l.status === 'won');
+    const activeNonVoidLegs = updatedLegs.filter(l => l.status === 'won' || l.status === 'pending');
+
+    const effectiveProduct = activeNonVoidLegs.reduce((acc, l) => acc * l.odds, 1);
+    const nextEffectiveOdds =
+      activeNonVoidLegs.length === 0 ? 1 : Number(Math.min(100000, Math.max(1, effectiveProduct)).toFixed(2));
+    const nextPotentialWinnings = Math.round(parlay.amount * nextEffectiveOdds);
+
+    if (hasLost) {
+      ops.push({
+        kind: 'update',
+        ref: doc(db, 'parlay_bets', parlay.id),
+        data: {
+          legs: updatedLegs,
+          effectiveOdds: nextEffectiveOdds,
+          potentialWinnings: nextPotentialWinnings,
+          result: 'lost',
+          actualWinnings: 0,
+          settledAt: nowIso,
+          updatedAt: serverTimestamp()
+        }
+      });
+    } else if (!hasPending) {
+      const isAllVoided = wonLegs.length === 0;
+      const payoutAmount = isAllVoided ? parlay.amount : nextPotentialWinnings;
+      const nextResult: ParlayBet['result'] = isAllVoided ? 'voided' : 'won';
+
+      ops.push({
+        kind: 'update',
+        ref: doc(db, 'parlay_bets', parlay.id),
+        data: {
+          legs: updatedLegs,
+          effectiveOdds: nextEffectiveOdds,
+          potentialWinnings: nextPotentialWinnings,
+          result: nextResult,
+          actualWinnings: payoutAmount,
+          settledAt: nowIso,
+          updatedAt: serverTimestamp()
+        }
+      });
+
+      const cur = userCoins.get(parlay.userId);
+      const ownerUid =
+        userOwnerUids.get(parlay.userId) || (await resolveUserOwnerUid(parlay.userId, parlay.ownerUid));
+      if (cur !== undefined) {
+        const nextBal = cur + payoutAmount;
+        userCoins.set(parlay.userId, nextBal);
+        if (ownerUid) {
+          const txId = createUniqueTxId('tx');
+          ops.push({
+            kind: 'set',
+            ref: doc(db, 'transactions', txId),
+            data: {
+              id: txId,
+              userId: parlay.userId,
+              ownerUid,
+              username: parlay.username,
+              type: isAllVoided ? 'bet_refund' : 'bet_won',
+              amount: payoutAmount,
+              balanceBefore: cur,
+              balanceAfter: nextBal,
+              status: 'completed',
+              description: isAllVoided
+                ? `Bet Builder void refund (${parlay.legCount} legs)`.slice(0, 300)
+                : `Bet Builder WON (${parlay.legCount} legs @ ${nextEffectiveOdds.toFixed(2)}x)`.slice(0, 300),
+              referenceId: parlay.id,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }
+          });
+        }
+      }
+      if (!isAllVoided) {
+        parlayWinnersCount += 1;
+        parlayPayout += payoutAmount;
+      }
+    } else {
+      ops.push({
+        kind: 'update',
+        ref: doc(db, 'parlay_bets', parlay.id),
+        data: {
+          legs: updatedLegs,
+          effectiveOdds: nextEffectiveOdds,
+          potentialWinnings: nextPotentialWinnings,
+          updatedAt: serverTimestamp()
+        }
+      });
+    }
+  }
+
+  return { parlayWinnersCount, parlayPayout };
 }
 
 export async function fsDeletePrediction(
@@ -1494,6 +1842,8 @@ export async function fsDeletePrediction(
     refundedCount += 1;
     refundedTotal += bet.amount;
   }
+
+  await applyMarketResolutionToParlays(id, 'VOID', nowIso, userCoins, userOwnerUids, ops);
 
   for (const [uid, nextCoins] of userCoins.entries()) {
     const orig = users.find(u => u.id === uid);
@@ -1642,6 +1992,17 @@ export async function fsSettlePrediction(
       });
     }
   }
+
+  const parlayRes = await applyMarketResolutionToParlays(
+    predictionId,
+    outcome,
+    nowIso,
+    userCoins,
+    userOwnerUids,
+    ops
+  );
+  winnersCount += parlayRes.parlayWinnersCount;
+  totalPayout += parlayRes.parlayPayout;
 
   for (const [uid, nextCoins] of userCoins.entries()) {
     const orig = users.find(u => u.id === uid);

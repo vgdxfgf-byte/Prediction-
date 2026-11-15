@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import http from 'node:http';
+import { WebSocketServer, WebSocket } from 'ws';
 import type {
   User,
   Prediction,
@@ -17,6 +19,10 @@ import type {
 } from './src/types/index.ts';
 import { createInitialDatabaseState, INITIAL_ADMIN_USER } from './server/seedData.ts';
 import type { DatabaseState } from './server/seedData.ts';
+import {
+  fetchLiveCricketMatches,
+  fetchLiveCricketMatchDetail
+} from './server/cricketLiveService.ts';
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -1232,6 +1238,39 @@ async function startServer() {
     res.json({ success: true, state: getAdminStatePayload() });
   });
 
+  // --- Live Cricket Match Endpoints ---
+
+  app.get('/api/cricket/matches', async (req, res) => {
+    try {
+      const force = req.query.refresh === '1';
+      const { matches, fetchedAt } = await fetchLiveCricketMatches(force);
+      const liveCount = matches.filter(m => m.status === 'in').length;
+      res.json({ success: true, matches, fetchedAt, liveCount });
+    } catch (err) {
+      res.status(502).json({
+        success: false,
+        error: err instanceof Error ? err.message : 'Unable to fetch live cricket matches'
+      });
+    }
+  });
+
+  app.get('/api/cricket/match/:leagueId/:eventId', async (req, res) => {
+    try {
+      const force = req.query.refresh === '1';
+      const detail = await fetchLiveCricketMatchDetail(
+        req.params.leagueId,
+        req.params.eventId,
+        force
+      );
+      res.json({ success: true, detail });
+    } catch (err) {
+      res.status(502).json({
+        success: false,
+        error: err instanceof Error ? err.message : 'Unable to fetch live cricket match scorecard'
+      });
+    }
+  });
+
   // --- Vite Dev Middleware or Production Static Bundle ---
 
   const isDev =
@@ -1258,8 +1297,114 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`ApexPredict Exchange server listening on http://0.0.0.0:${PORT} (${isDev ? 'dev' : 'production'})`);
+  // --- HTTP + Real-Time Live Cricket WebSocket Server ---
+
+  const server = http.createServer(app);
+  const wss = new WebSocketServer({ noServer: true });
+  const clientSubs = new Map<WebSocket, { leagueId: string; eventId: string }>();
+
+  server.on('upgrade', (request, socket, head) => {
+    const reqUrl = request.url || '';
+    const pathname = reqUrl.split('?')[0];
+    if (pathname !== '/ws/cricket') {
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, ws => {
+      wss.emit('connection', ws, request);
+    });
+  });
+
+  let cricketPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  const broadcastMatchesToClients = async (force = false) => {
+    if (wss.clients.size === 0) return;
+    try {
+      const { matches, fetchedAt } = await fetchLiveCricketMatches(force);
+      const payload = JSON.stringify({ type: 'cricket:matches', matches, fetchedAt });
+      for (const client of wss.clients) {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(payload);
+        }
+      }
+
+      // Refresh subscribed match scorecards cleanly
+      const uniqueTargets = new Map<string, { leagueId: string; eventId: string }>();
+      for (const [ws, sub] of clientSubs.entries()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          uniqueTargets.set(`${sub.leagueId}:${sub.eventId}`, sub);
+        }
+      }
+      for (const [key, sub] of uniqueTargets.entries()) {
+        try {
+          const detail = await fetchLiveCricketMatchDetail(sub.leagueId, sub.eventId, force);
+          const detailPayload = JSON.stringify({ type: 'cricket:detail', detail });
+          for (const [ws, clientSub] of clientSubs.entries()) {
+            if (ws.readyState === WebSocket.OPEN && `${clientSub.leagueId}:${clientSub.eventId}` === key) {
+              ws.send(detailPayload);
+            }
+          }
+        } catch {
+          // Ignore single match detail fetch glitch
+        }
+      }
+    } catch {
+      // Retain existing client state on transient upstream error
+    }
+  };
+
+  const ensureCricketPolling = () => {
+    if (wss.clients.size > 0 && !cricketPollTimer) {
+      cricketPollTimer = setInterval(() => {
+        void broadcastMatchesToClients(true);
+      }, 12000);
+    } else if (wss.clients.size === 0 && cricketPollTimer) {
+      clearInterval(cricketPollTimer);
+      cricketPollTimer = null;
+    }
+  };
+
+  wss.on('connection', ws => {
+    ensureCricketPolling();
+    void fetchLiveCricketMatches(false)
+      .then(({ matches, fetchedAt }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'cricket:matches', matches, fetchedAt }));
+        }
+      })
+      .catch(() => {});
+
+    ws.on('message', raw => {
+      try {
+        const msg = JSON.parse(String(raw)) as {
+          type?: string;
+          leagueId?: string;
+          eventId?: string;
+        };
+        if (msg.type === 'subscribe_match' && msg.leagueId && msg.eventId) {
+          clientSubs.set(ws, { leagueId: msg.leagueId, eventId: msg.eventId });
+          void fetchLiveCricketMatchDetail(msg.leagueId, msg.eventId, false)
+            .then(detail => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'cricket:detail', detail }));
+              }
+            })
+            .catch(() => {});
+        } else if (msg.type === 'refresh') {
+          void broadcastMatchesToClients(true);
+        }
+      } catch {
+        // Ignore invalid WS messages
+      }
+    });
+
+    ws.on('close', () => {
+      clientSubs.delete(ws);
+      ensureCricketPolling();
+    });
+  });
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`ApexPredict server listening on http://0.0.0.0:${PORT} (${isDev ? 'dev' : 'production'})`);
   });
 }
 

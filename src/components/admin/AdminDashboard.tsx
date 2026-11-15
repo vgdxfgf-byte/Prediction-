@@ -46,6 +46,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     stats,
     users,
     bets,
+    parlayBets,
     deposits,
     withdrawals,
     coinLogs,
@@ -100,16 +101,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const regularUsers = users.filter(u => u.id !== 'usr_admin');
-  const wonBetsCount = bets.filter(b => b.result === 'won').length;
-  const lostBetsCount = bets.filter(b => b.result === 'lost').length;
-  const pendingBetsCount = bets.filter(b => b.result === 'pending').length;
+  const wonBetsCount = bets.filter(b => b.result === 'won').length + parlayBets.filter(p => p.result === 'won').length;
+  const lostBetsCount = bets.filter(b => b.result === 'lost').length + parlayBets.filter(p => p.result === 'lost').length;
+  const pendingBetsCount = bets.filter(b => b.result === 'pending').length + parlayBets.filter(p => p.result === 'pending').length;
 
   const totalDepositsVolume = deposits.reduce((sum, d) => sum + d.amount, 0);
   const totalWithdrawalsVolume = withdrawals.reduce((sum, w) => sum + w.amount, 0);
   const openIdChats = idChats.filter(c => c.status === 'open');
   const unreadIdChatsCount = idChats.filter(c => c.unreadByAdmin).length;
 
-  // Build real Platform Overview time-series from exchange events
+  // Build real Platform Overview time-series from platform events
   const chartData = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -139,12 +140,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     bets.forEach(b => addEvent(b.createdAt, b.amount));
+    parlayBets.forEach(p => addEvent(p.createdAt, p.amount));
     deposits.forEach(d => addEvent(d.createdAt, d.amount));
     withdrawals.forEach(w => addEvent(w.createdAt, w.amount));
     coinLogs.forEach(l => addEvent(l.createdAt, l.amount));
 
     return buckets;
-  }, [bets, deposits, withdrawals, coinLogs, chartWindow]);
+  }, [bets, parlayBets, deposits, withdrawals, coinLogs, chartWindow]);
 
   // SVG chart coordinate math
   const svgW = 540;
@@ -252,10 +254,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <Crown className="w-4 h-4" />
             <span>Master Control Panel</span>
             <span className="text-slate-500">·</span>
-            <span className="text-[#14e071]">Live Exchange</span>
+            <span className="text-[#14e071]">Live Markets</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-            Exchange Administration
+            Platform Administration
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-xl">
             Monitor platform volume, manage user wallets, publish Cricket & Movie markets, and process requests in real time.
@@ -602,7 +604,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="font-mono-numbers text-2xl font-black text-rose-400">
             {lostBetsCount}
           </div>
-          <div className="text-[11px] text-slate-400">Settled to exchange</div>
+          <div className="text-[11px] text-slate-400">Settled picks</div>
         </div>
 
         <div className="apex-card p-4 rounded-xl space-y-1">

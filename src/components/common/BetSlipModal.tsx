@@ -45,10 +45,12 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [imgFailed, setImgFailed] = useState<boolean>(false);
   const [liveNowMs, setLiveNowMs] = useState<number>(() => Date.now());
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [successData, setSuccessData] = useState<{
     betId: string;
     payout: number;
     amount: number;
+    lockedOdds: number;
   } | null>(null);
 
   useEffect(() => {
@@ -59,8 +61,9 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
     setErrorMsg('');
     setImgFailed(false);
     setSuccessData(null);
+    setIsSubmitting(false);
     setLiveNowMs(Date.now());
-  }, [prediction, initialChoice]);
+  }, [prediction?.id, initialChoice]);
 
   useEffect(() => {
     if (!prediction || successData) return;
@@ -131,27 +134,34 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
       return;
     }
 
-    const res = await placeBet(prediction.id, choice, amount);
-    if (!res.success) {
-      setErrorMsg(res.error || 'Failed to place prediction');
-      return;
-    }
-
+    setIsSubmitting(true);
+    setErrorMsg('');
     try {
-      confetti({
-        particleCount: 80,
-        spread: 60,
-        origin: { y: 0.6 }
-      });
-    } catch {
-      // Ignore if confetti fails
-    }
+      const res = await placeBet(prediction.id, choice, amount);
+      if (!res.success) {
+        setErrorMsg(res.error || 'Failed to place prediction');
+        return;
+      }
 
-    setSuccessData({
-      betId: res.betId || '',
-      payout: potentialWinnings,
-      amount
-    });
+      try {
+        confetti({
+          particleCount: 80,
+          spread: 60,
+          origin: { y: 0.6 }
+        });
+      } catch {
+        // Ignore if confetti fails
+      }
+
+      setSuccessData({
+        betId: res.betId || '',
+        payout: res.lockedPayout ?? potentialWinnings,
+        amount,
+        lockedOdds: res.lockedOdds ?? odds
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -202,7 +212,7 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
             <div>
               <h4 className="text-xl font-black text-white">Prediction Confirmed!</h4>
               <p className="text-xs text-slate-400 mt-1">
-                Your prediction is locked in on the exchange ledger.
+                Your prediction is locked in on the platform ledger.
               </p>
             </div>
 
@@ -220,7 +230,7 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
                     choice === 'YES' ? 'text-[#14e071]' : 'text-rose-400'
                   }`}
                 >
-                  {choice} @ {odds.toFixed(2)}x
+                  {choice} @ {successData.lockedOdds.toFixed(2)}x
                 </span>
               </div>
               <div className="flex justify-between text-slate-400">
@@ -485,17 +495,19 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
             <motion.button
               type="submit"
               whileTap={{ scale: isPausedOrClosed ? 1 : 0.98 }}
-              disabled={isPausedOrClosed || isInsufficient || amount < prediction.minBet}
+              disabled={isSubmitting || isPausedOrClosed || isInsufficient || amount < prediction.minBet}
               className="w-full py-3 rounded-xl apex-glow-btn disabled:opacity-50 disabled:cursor-not-allowed font-black text-sm tracking-wide transition cursor-pointer"
             >
-              {isPausedOrClosed
-                ? 'Betting Paused · Market Closed'
-                : `Place Prediction (${choice} · ${amount} Coins)`}
+              {isSubmitting
+                ? 'Placing Prediction...'
+                : isPausedOrClosed
+                  ? 'Betting Paused · Market Closed'
+                  : `Place Prediction (${choice} · ${amount} Coins)`}
             </motion.button>
 
             <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500 pt-0.5">
               <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
-              <span>100% Secure & Fair Play</span>
+              <span>100% Secure &amp; Fair Play</span>
             </div>
           </form>
         )}

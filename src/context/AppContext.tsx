@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { onAuthStateChanged, type User as FirebaseAuthUser } from 'firebase/auth';
 import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { isClosingTimePassed, isMarketBettingOpen } from '../utils/marketTiming';
+import { isMarketBettingOpen } from '../utils/marketTiming';
 import {
   BOOTSTRAPPED_ADMIN_EMAIL,
   checkIsFirebaseAdmin,
@@ -13,6 +13,7 @@ import {
   fsDeletePrediction,
   fsDeleteUser,
   fsPlaceBet,
+  fsPlaceParlayBet,
   fsRequestDeposit,
   fsRequestWithdrawal,
   fsResetUserPassword,
@@ -39,9 +40,18 @@ import {
   subscribeUserPortalData
 } from '../services/firestoreService';
 import {
+  CricketLiveClient,
+  fetchCricketMatchesRest,
+  fetchCricketMatchDetailRest
+} from '../services/cricketLiveClient';
+import {
   User,
   Prediction,
   Bet,
+  ParlayBet,
+  BuilderSelection,
+  LiveCricketMatch,
+  LiveCricketDetail,
   Transaction,
   DepositRequest,
   WithdrawalRequest,
@@ -92,6 +102,7 @@ interface AppContextType {
   users: User[];
   predictions: Prediction[];
   bets: Bet[];
+  parlayBets: ParlayBet[];
   transactions: Transaction[];
   deposits: DepositRequest[];
   withdrawals: WithdrawalRequest[];
@@ -100,8 +111,32 @@ interface AppContextType {
   nowMs: number;
   portalDataError: string | null;
 
+  // Live Cricket Real-Time Stream
+  liveCricketMatches: LiveCricketMatch[];
+  liveCricketFetchedAt: string;
+  cricketStreamConnected: boolean;
+  cricketLoading: boolean;
+  cricketError: string | null;
+  activeCricketDetail: LiveCricketDetail | null;
+  cricketDetailLoading: boolean;
+  refreshCricketMatches: () => Promise<void>;
+  selectCricketMatchForDetail: (match: LiveCricketMatch | null) => Promise<void>;
+
+  // Bet Builder (Multi-Prediction Combo)
+  builderSelections: BuilderSelection[];
+  toggleBuilderLeg: (prediction: Prediction, choice: 'YES' | 'NO') => void;
+  removeBuilderLeg: (predictionId: string) => void;
+  clearBuilder: () => void;
+  placeParlayBet: (amount: number) => Promise<
+    ActionResult & { parlayId?: string; combinedOdds?: number; potentialWinnings?: number }
+  >;
+
   // User Actions
-  placeBet: (predictionId: string, choice: 'YES' | 'NO', amount: number) => Promise<ActionResult & { betId?: string }>;
+  placeBet: (
+    predictionId: string,
+    choice: 'YES' | 'NO',
+    amount: number
+  ) => Promise<ActionResult & { betId?: string; lockedOdds?: number; lockedPayout?: number }>;
   requestDeposit: (amount: number, paymentMethod: string, referenceNumber: string, notes?: string) => Promise<ActionResult>;
   requestWithdrawal: (amount: number, payoutMethod: string, payoutDetails: string) => Promise<ActionResult>;
 
@@ -226,6 +261,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [users, setUsers] = useState<User[]>([]);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [bets, setBets] = useState<Bet[]>([]);
+  const [parlayBets, setParlayBets] = useState<ParlayBet[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [deposits, setDeposits] = useState<DepositRequest[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
@@ -234,6 +270,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [paymentGateway, setPaymentGateway] = useState<PaymentGatewayConfig>(DEFAULT_PAYMENT_GATEWAY);
   const [whatsappSupport, setWhatsappSupport] = useState<WhatsAppSupportConfig>(DEFAULT_WHATSAPP_SUPPORT);
   const [portalDataError, setPortalDataError] = useState<string | null>(null);
+
+  // Bet Builder state
+  const [builderSelections, setBuilderSelections] = useState<BuilderSelection[]>([]);
+
+  // Live Cricket Real-Time State
+  const [liveCricketMatches, setLiveCricketMatches] = useState<LiveCricketMatch[]>([]);
+  const [liveCricketFetchedAt, setLiveCricketFetchedAt] = useState<string>('');
+  const [cricketStreamConnected, setCricketStreamConnected] = useState<boolean>(false);
+  const [cricketLoading, setCricketLoading] = useState<boolean>(true);
+  const [cricketError, setCricketError] = useState<string | null>(null);
+  const [activeCricketDetail, setActiveCricketDetail] = useState<LiveCricketDetail | null>(null);
+  const [cricketDetailLoading, setCricketDetailLoading] = useState<boolean>(false);
+  const cricketClientRef = useRef<CricketLiveClient | null>(null);
+  const selectedMatchKeyRef = useRef<string | null>(null);
 
   const setActivePortal = useCallback((portal: 'user' | 'admin') => {
     setActivePortalState(portal);
@@ -259,6 +309,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUser(null);
         setUsers([]);
         setBets([]);
+        setParlayBets([]);
         setTransactions([]);
         setDeposits([]);
         setWithdrawals([]);
@@ -270,6 +321,96 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     return () => unsub();
   }, []);
+
+  // Real-time Cricket Match WebSocket + Initial REST hydration
+  const refreshCricketMatches = useCallback(async () => {
+    setCricketLoading(true);
+    try {
+      const { matches, fetchedAt } = await fetchCricketMatchesRest();
+      setLiveCricketMatches(matches);
+      setLiveCricketFetchedAt(fetchedAt);
+      setCricketError(null);
+      cricketClientRef.current?.requestRefresh();
+    } catch (err) {
+      setCricketError(err instanceof Error ? err.message : 'Unable to load live cricket feed');
+    } finally {
+      setCricketLoading(false);
+    }
+  }, []);
+
+  const selectCricketMatchForDetail = useCallback(async (match: LiveCricketMatch | null) => {
+    if (!match) {
+      selectedMatchKeyRef.current = null;
+      setActiveCricketDetail(null);
+      setCricketDetailLoading(false);
+      return;
+    }
+    const key = `${match.leagueId}:${match.id}`;
+    selectedMatchKeyRef.current = key;
+    setCricketDetailLoading(true);
+    cricketClientRef.current?.subscribeMatch(match.leagueId, match.id);
+    try {
+      const detail = await fetchCricketMatchDetailRest(match.leagueId, match.id);
+      if (selectedMatchKeyRef.current === key) {
+        setActiveCricketDetail(detail);
+      }
+    } catch {
+      // Keep fallback match header even if scorecard detail endpoint fails
+      if (selectedMatchKeyRef.current === key) {
+        setActiveCricketDetail({
+          match,
+          matchcards: [],
+          fetchedAt: new Date().toISOString()
+        });
+      }
+    } finally {
+      if (selectedMatchKeyRef.current === key) {
+        setCricketDetailLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activePortal !== 'admin' || !adminUser) {
+      setCricketStreamConnected(false);
+      setActiveCricketDetail(null);
+      selectedMatchKeyRef.current = null;
+      return;
+    }
+
+    let mounted = true;
+    void refreshCricketMatches();
+
+    const client = new CricketLiveClient({
+      onMatches: (matches, fetchedAt) => {
+        if (!mounted) return;
+        setLiveCricketMatches(matches);
+        setLiveCricketFetchedAt(fetchedAt);
+        setCricketError(null);
+        setCricketLoading(false);
+      },
+      onDetail: detail => {
+        if (!mounted) return;
+        const incomingKey = `${detail.match.leagueId}:${detail.match.id}`;
+        if (selectedMatchKeyRef.current === incomingKey) {
+          setActiveCricketDetail(detail);
+          setCricketDetailLoading(false);
+        }
+      },
+      onConnectionChange: connected => {
+        if (!mounted) return;
+        setCricketStreamConnected(connected);
+      }
+    });
+    cricketClientRef.current = client;
+    client.start();
+
+    return () => {
+      mounted = false;
+      client.stop();
+      cricketClientRef.current = null;
+    };
+  }, [activePortal, adminUser, refreshCricketMatches]);
 
   // Synchronized market clock (ticks every 5 seconds to auto-pause markets at exact closing time)
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
@@ -295,7 +436,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (!adminUser || activePortal !== 'admin') return;
     for (const pred of predictions) {
-      if (pred.status === 'open' && isClosingTimePassed(pred.closingTime, nowMs)) {
+      if (pred.status === 'open' && !isMarketBettingOpen(pred, nowMs)) {
         const key = `${pred.id}|${pred.closingTime}`;
         if (!autoPausedKeysRef.current.has(key)) {
           autoPausedKeysRef.current.add(key);
@@ -336,6 +477,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         portalUnsub = subscribeAdminPortalData({
           onUsers: u => setUsers(u),
           onBets: b => setBets(b),
+          onParlayBets: pb => setParlayBets(pb),
           onTransactions: t => setTransactions(t),
           onDeposits: d => setDeposits(d),
           onWithdrawals: w => setWithdrawals(w),
@@ -383,6 +525,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setCurrentUser(u);
           },
           onBets: b => setBets(b),
+          onParlayBets: pb => setParlayBets(pb),
           onTransactions: t => setTransactions(t),
           onDeposits: d => setDeposits(d),
           onWithdrawals: w => setWithdrawals(w),
@@ -399,7 +542,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [fbAuthUser, activePortal, activeUserId]);
 
-  // Platform Stats
+  // Platform Stats (including Bet Builder parlays)
   const regularUsers = users.filter(u => u.id !== 'usr_admin');
   const stats: PlatformStats = {
     totalUsers: regularUsers.length,
@@ -409,9 +552,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     totalPredictions: predictions.length,
     openPredictions: predictions.filter(p => isMarketBettingOpen(p, nowMs)).length,
     settledPredictions: predictions.filter(p => p.status === 'settled').length,
-    totalBetsPlaced: bets.length,
-    totalBetVolume: bets.reduce((sum, b) => sum + b.amount, 0),
-    totalWonPayouts: bets.filter(b => b.result === 'won').reduce((sum, b) => sum + b.actualWinnings, 0),
+    totalBetsPlaced: bets.length + parlayBets.length,
+    totalBetVolume:
+      bets.reduce((sum, b) => sum + b.amount, 0) +
+      parlayBets.reduce((sum, pb) => sum + pb.amount, 0),
+    totalWonPayouts:
+      bets.filter(b => b.result === 'won').reduce((sum, b) => sum + b.actualWinnings, 0) +
+      parlayBets.filter(pb => pb.result === 'won').reduce((sum, pb) => sum + pb.actualWinnings, 0),
     pendingDepositsCount: deposits.filter(d => d.status === 'pending').length,
     pendingDepositsAmount: deposits.filter(d => d.status === 'pending').reduce((sum, d) => sum + d.amount, 0),
     pendingWithdrawalsCount: withdrawals.filter(w => w.status === 'pending' || w.status === 'processing').length,
@@ -452,6 +599,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveUserId(null);
     setCurrentUser(null);
     setAdminUser(null);
+    setBuilderSelections([]);
     void logoutFirebase();
   };
 
@@ -471,16 +619,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   };
 
+  // --- Bet Builder Actions ---
+
+  const toggleBuilderLeg = useCallback((prediction: Prediction, choice: 'YES' | 'NO') => {
+    setBuilderSelections(prev => {
+      const existingIdx = prev.findIndex(s => s.prediction.id === prediction.id);
+      if (existingIdx >= 0) {
+        const existing = prev[existingIdx];
+        if (existing.choice === choice) {
+          return prev.filter(s => s.prediction.id !== prediction.id);
+        }
+        return prev.map(s => (s.prediction.id === prediction.id ? { prediction, choice } : s));
+      }
+      if (prev.length >= 10) {
+        return prev;
+      }
+      return [...prev, { prediction, choice }];
+    });
+  }, []);
+
+  const removeBuilderLeg = useCallback((predictionId: string) => {
+    setBuilderSelections(prev => prev.filter(s => s.prediction.id !== predictionId));
+  }, []);
+
+  const clearBuilder = useCallback(() => {
+    setBuilderSelections([]);
+  }, []);
+
+  const placeParlayBet = async (
+    amount: number
+  ): Promise<ActionResult & { parlayId?: string; combinedOdds?: number; potentialWinnings?: number }> => {
+    if (!fbAuthUser || !currentUser) return { success: false, error: 'Please sign in first' };
+    if (builderSelections.length < 2) {
+      return { success: false, error: 'Select at least 2 predictions to place a Bet Builder combo' };
+    }
+    try {
+      // Sync latest prediction snapshots for each selected leg
+      const syncedSelections = builderSelections.map(sel => {
+        const latest = predictions.find(p => p.id === sel.prediction.id) || sel.prediction;
+        return { prediction: latest, choice: sel.choice };
+      });
+      const res = await fsPlaceParlayBet(fbAuthUser.uid, currentUser, syncedSelections, amount);
+      if (res.success) {
+        setBuilderSelections([]);
+      }
+      return res;
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to place Bet Builder slip' };
+    }
+  };
+
   // --- User Actions ---
 
   const placeBet = async (
     predictionId: string,
     choice: 'YES' | 'NO',
     amount: number
-  ): Promise<ActionResult & { betId?: string }> => {
+  ): Promise<ActionResult & { betId?: string; lockedOdds?: number; lockedPayout?: number }> => {
     if (!fbAuthUser || !currentUser) return { success: false, error: 'Please sign in first' };
     const pred = predictions.find(p => p.id === predictionId);
     if (!pred) return { success: false, error: 'Prediction market not found' };
+
     try {
       return await fsPlaceBet(fbAuthUser.uid, currentUser, pred, choice, amount);
     } catch (err) {
@@ -795,6 +994,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         users,
         predictions,
         bets,
+        parlayBets,
         transactions,
         deposits,
         withdrawals,
@@ -802,6 +1002,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         stats,
         nowMs,
         portalDataError,
+
+        liveCricketMatches,
+        liveCricketFetchedAt,
+        cricketStreamConnected,
+        cricketLoading,
+        cricketError,
+        activeCricketDetail,
+        cricketDetailLoading,
+        refreshCricketMatches,
+        selectCricketMatchForDetail,
+
+        builderSelections,
+        toggleBuilderLeg,
+        removeBuilderLeg,
+        clearBuilder,
+        placeParlayBet,
 
         placeBet,
         requestDeposit,
