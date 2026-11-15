@@ -12,7 +12,6 @@ import {
   ArrowRight,
   MessageSquarePlus,
   Smartphone,
-  KeyRound,
   UserPlus,
   RotateCcw,
   Eye,
@@ -27,7 +26,7 @@ interface UserLoginProps {
   onGoToAdmin: () => void;
 }
 
-type AuthMode = 'signin' | 'register' | 'reset';
+type AuthMode = 'signin' | 'register';
 
 const COUNTRY_CODES = [
   { code: '+91', label: '🇮🇳 +91 (IN)' },
@@ -48,8 +47,6 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
     registerFreeWithPhone,
     sendRegistrationOtp,
     completeRegistrationOtp,
-    sendPasswordResetOtp,
-    completePasswordResetOtp,
     clearPhoneRecaptcha
   } = useApp();
 
@@ -73,18 +70,6 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
   const [regConfirmResult, setRegConfirmResult] = useState<ConfirmationResult | null>(null);
   const [regE164Phone, setRegE164Phone] = useState('');
   const [showRegPass, setShowRegPass] = useState(false);
-
-  // Reset / Make Password via OTP state
-  const [resetStep, setResetStep] = useState<'phone' | 'otp'>('phone');
-  const [resetCountryCode, setResetCountryCode] = useState('+91');
-  const [resetPhone, setResetPhone] = useState('');
-  const [resetOtp, setResetOtp] = useState('');
-  const [resetNewPass, setResetNewPass] = useState('');
-  const [resetConfirmPass, setResetConfirmPass] = useState('');
-  const [resetConfirmResult, setResetConfirmResult] = useState<ConfirmationResult | null>(null);
-  const [resetE164Phone, setResetE164Phone] = useState('');
-  const [resetTargetUsername, setResetTargetUsername] = useState('');
-  const [showResetPass, setShowResetPass] = useState(false);
 
   // Shared UI state
   const [errorMsg, setErrorMsg] = useState('');
@@ -233,67 +218,6 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
     setSuccessMsg('Account verified and password created!');
   };
 
-  const handleSendResetOtp = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setErrorMsg('');
-    setSuccessMsg('');
-    setIsLoading(true);
-
-    const res = await sendPasswordResetOtp({
-      phone: resetPhone,
-      countryCode: resetCountryCode,
-      recaptchaContainerId: 'firebase-recaptcha-container'
-    });
-    setIsLoading(false);
-
-    if (!res.success || !res.confirmationResult || !res.e164Phone) {
-      setErrorMsg(res.error || 'Failed to send OTP');
-      return;
-    }
-
-    setResetConfirmResult(res.confirmationResult);
-    setResetE164Phone(res.e164Phone);
-    setResetTargetUsername(res.username || '');
-    setResetStep('otp');
-    setResendSeconds(30);
-    setSuccessMsg(`OTP sent to ${res.e164Phone}`);
-  };
-
-  const handleVerifyResetOtpAndSavePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('');
-    setSuccessMsg('');
-
-    if (!resetConfirmResult) {
-      setErrorMsg('OTP session expired. Please request a new OTP.');
-      setResetStep('phone');
-      return;
-    }
-    if (resetNewPass.trim().length < 4) {
-      setErrorMsg('New password must be at least 4 characters long');
-      return;
-    }
-    if (resetNewPass !== resetConfirmPass) {
-      setErrorMsg('New password and confirmation do not match');
-      return;
-    }
-
-    setIsLoading(true);
-    const res = await completePasswordResetOtp({
-      confirmationResult: resetConfirmResult,
-      otpCode: resetOtp,
-      newPassword: resetNewPass,
-      e164Phone: resetE164Phone
-    });
-    setIsLoading(false);
-
-    if (!res.success) {
-      setErrorMsg(res.error || 'Failed to set password via OTP');
-      return;
-    }
-    setSuccessMsg('Password updated! Signing you in...');
-  };
-
   return (
     <div className="min-h-[80vh] flex items-center justify-center p-4">
       <motion.div
@@ -321,11 +245,11 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
         {/* Auth Card */}
         <div className="apex-card-emerald rounded-2xl p-6 sm:p-7 space-y-5">
           {/* Mode Tabs */}
-          <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#060b0e] rounded-xl border border-white/[0.08]">
+          <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#060b0e] rounded-xl border border-white/[0.08]">
             <button
               type="button"
               onClick={() => switchMode('signin')}
-              className={`py-2 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
+              className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                 mode === 'signin'
                   ? 'bg-[#14e071] text-[#04130b] shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -337,7 +261,7 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
             <button
               type="button"
               onClick={() => switchMode('register')}
-              className={`py-2 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
+              className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                 mode === 'register'
                   ? 'bg-[#14e071] text-[#04130b] shadow-sm'
                   : 'text-slate-400 hover:text-white'
@@ -345,18 +269,6 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
             >
               <UserPlus className="w-3.5 h-3.5 shrink-0" />
               <span>Create ID</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => switchMode('reset')}
-              className={`py-2 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
-                mode === 'reset'
-                  ? 'bg-[#14e071] text-[#04130b] shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <KeyRound className="w-3.5 h-3.5 shrink-0" />
-              <span>OTP Pass</span>
             </button>
           </div>
 
@@ -388,16 +300,7 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
               </div>
 
               <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-slate-300 block">Password</label>
-                  <button
-                    type="button"
-                    onClick={() => switchMode('reset')}
-                    className="text-[11px] font-semibold text-[#14e071] hover:underline cursor-pointer"
-                  >
-                    Make / Reset Password via OTP?
-                  </button>
-                </div>
+                <label className="text-xs font-semibold text-slate-300 block">Password</label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
                   <input
@@ -826,203 +729,6 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
                 </form>
               )}
             </div>
-          )}
-
-          {/* MODE 3: MAKE / RESET PASSWORD VIA MOBILE OTP */}
-          {mode === 'reset' && (
-            <>
-              {resetStep === 'phone' ? (
-                <form onSubmit={handleSendResetOtp} className="space-y-4">
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-[#14e071]/25 text-[11px] text-emerald-200 space-y-2">
-                    <div className="flex items-start gap-2">
-                      <KeyRound className="w-4 h-4 text-[#14e071] shrink-0 mt-0.5" />
-                      <span>
-                        SMS OTP reset works for <strong>Mobile SMS OTP</strong> accounts (requires Blaze or Firebase Test Numbers).
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/[0.08] text-[10px] text-slate-300">
-                      <span>Using <strong>Instant Free</strong> or Admin ID? Reset free anytime via Admin Chat:</span>
-                      <button
-                        type="button"
-                        onClick={() => setShowIdChat(true)}
-                        className="shrink-0 px-2.5 py-1 rounded-lg bg-[#14e071]/15 hover:bg-[#14e071]/25 border border-[#14e071]/40 text-[#14e071] font-bold cursor-pointer transition"
-                      >
-                        Free Reset Chat
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-300 block">Registered Mobile Number</label>
-                    <div className="flex gap-2">
-                      <select
-                        value={resetCountryCode}
-                        onChange={e => setResetCountryCode(e.target.value)}
-                        className="w-28 px-2 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white outline-none"
-                      >
-                        {COUNTRY_CODES.map(c => (
-                          <option key={c.code} value={c.code}>
-                            {c.label}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="relative flex-1">
-                        <Smartphone className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
-                        <input
-                          type="tel"
-                          required
-                          inputMode="tel"
-                          value={resetPhone}
-                          onChange={e => {
-                            setResetPhone(e.target.value);
-                            setErrorMsg('');
-                          }}
-                          placeholder="10-digit mobile number"
-                          className="w-full pl-9 pr-3 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {errorMsg && (
-                    <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{errorMsg}</span>
-                    </div>
-                  )}
-
-                  <motion.button
-                    type="submit"
-                    whileTap={{ scale: 0.98 }}
-                    disabled={isLoading}
-                    className="w-full py-3 rounded-xl apex-glow-btn disabled:opacity-60 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  >
-                    <span>{isLoading ? 'Sending OTP...' : 'Send OTP To Set Password'}</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </motion.button>
-                </form>
-              ) : (
-                <form onSubmit={handleVerifyResetOtpAndSavePassword} className="space-y-3.5">
-                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-[#14e071]/30 flex items-center justify-between text-xs">
-                    <div className="text-emerald-200">
-                      OTP sent to <span className="font-bold text-white">{resetE164Phone}</span>
-                      {resetTargetUsername && (
-                        <span className="block text-[10px] text-[#14e071]">Account: @{resetTargetUsername}</span>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setResetStep('phone');
-                        setResetOtp('');
-                        setErrorMsg('');
-                        setSuccessMsg('');
-                      }}
-                      className="text-[11px] font-bold text-[#14e071] hover:underline cursor-pointer"
-                    >
-                      Change
-                    </button>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-semibold text-slate-300 block">6-Digit OTP</label>
-                      <button
-                        type="button"
-                        disabled={resendSeconds > 0 || isLoading}
-                        onClick={() => void handleSendResetOtp()}
-                        className="text-[11px] font-semibold text-[#14e071] disabled:text-slate-500 flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                        <span>{resendSeconds > 0 ? `Resend in ${resendSeconds}s` : 'Resend OTP'}</span>
-                      </button>
-                    </div>
-                    <input
-                      type="text"
-                      required
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={resetOtp}
-                      onChange={e => {
-                        setResetOtp(e.target.value.replace(/\D/g, '').slice(0, 6));
-                        setErrorMsg('');
-                      }}
-                      placeholder="Enter 6-digit SMS OTP"
-                      className="w-full px-4 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-sm tracking-[0.3em] font-mono-numbers text-center text-white placeholder-slate-500 placeholder:tracking-normal outline-none transition"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-300 block">New Password</label>
-                    <div className="relative">
-                      <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                      <input
-                        type={showResetPass ? 'text' : 'password'}
-                        required
-                        minLength={4}
-                        value={resetNewPass}
-                        onChange={e => {
-                          setResetNewPass(e.target.value);
-                          setErrorMsg('');
-                        }}
-                        placeholder="Min 4 characters"
-                        className="w-full pl-10 pr-10 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowResetPass(v => !v)}
-                        className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 cursor-pointer"
-                      >
-                        {showResetPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-300 block">Confirm New Password</label>
-                    <div className="relative">
-                      <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
-                      <input
-                        type={showResetPass ? 'text' : 'password'}
-                        required
-                        minLength={4}
-                        value={resetConfirmPass}
-                        onChange={e => {
-                          setResetConfirmPass(e.target.value);
-                          setErrorMsg('');
-                        }}
-                        placeholder="Re-enter new password"
-                        className="w-full pl-10 pr-4 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
-                      />
-                    </div>
-                  </div>
-
-                  {errorMsg && (
-                    <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{errorMsg}</span>
-                    </div>
-                  )}
-
-                  {successMsg && (
-                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[#14e071] text-xs flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" />
-                      <span>{successMsg}</span>
-                    </div>
-                  )}
-
-                  <motion.button
-                    type="submit"
-                    whileTap={{ scale: 0.98 }}
-                    disabled={isLoading}
-                    className="w-full py-3 rounded-xl apex-glow-btn disabled:opacity-60 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  >
-                    <span>{isLoading ? 'Saving Password...' : 'Verify OTP & Save Password'}</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </motion.button>
-                </form>
-              )}
-            </>
           )}
 
           {/* Live Chat with Admin for New ID */}
