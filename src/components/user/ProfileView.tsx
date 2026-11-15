@@ -296,7 +296,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onClose }) => {
             </button>
           </div>
 
-          <div id="profile-recaptcha-container" />
+          <div id="profile-recaptcha-container" className="flex justify-center overflow-x-auto" />
 
           {tab === 'password' ? (
             <form onSubmit={handleSubmit} className="space-y-3">

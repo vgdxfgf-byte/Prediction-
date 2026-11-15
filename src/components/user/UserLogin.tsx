@@ -45,6 +45,7 @@ const COUNTRY_CODES = [
 export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
   const {
     loginUser,
+    registerFreeWithPhone,
     sendRegistrationOtp,
     completeRegistrationOtp,
     sendPasswordResetOtp,
@@ -59,7 +60,8 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
   const [password, setPassword] = useState('');
   const [showSignInPass, setShowSignInPass] = useState(false);
 
-  // Registration (Mobile + OTP -> Password) state
+  // Registration state ('free' = 100% free on Spark plan; 'otp' = Firebase SMS OTP)
+  const [regMethod, setRegMethod] = useState<'free' | 'otp'>('free');
   const [regStep, setRegStep] = useState<'details' | 'otp'>('details');
   const [regFullName, setRegFullName] = useState('');
   const [regUsername, setRegUsername] = useState('');
@@ -133,6 +135,37 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
     if (!res.success) {
       setErrorMsg(res.error || 'Invalid credentials');
     }
+  };
+
+  const handleFreeRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (regPassword.trim().length < 4) {
+      setErrorMsg('Password must be at least 4 characters long');
+      return;
+    }
+    if (regPassword !== regConfirmPassword) {
+      setErrorMsg('Password and confirmation do not match');
+      return;
+    }
+
+    setIsLoading(true);
+    const res = await registerFreeWithPhone({
+      fullName: regFullName,
+      username: regUsername,
+      phone: regPhone,
+      countryCode: regCountryCode,
+      password: regPassword
+    });
+    setIsLoading(false);
+
+    if (!res.success) {
+      setErrorMsg(res.error || 'Failed to create account');
+      return;
+    }
+    setSuccessMsg('Account created! Signing you in...');
   };
 
   const handleSendRegOtp = async (e?: React.FormEvent) => {
@@ -327,8 +360,8 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
             </button>
           </div>
 
-          {/* Persistent Invisible Firebase reCAPTCHA container */}
-          <div id="firebase-recaptcha-container" />
+          {/* Persistent Firebase reCAPTCHA container */}
+          <div id="firebase-recaptcha-container" className="flex justify-center overflow-x-auto" />
 
           {/* MODE 1: SIGN IN */}
           {mode === 'signin' && (
@@ -409,14 +442,187 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
             </form>
           )}
 
-          {/* MODE 2: SELF-REGISTER WITH MOBILE + OTP -> MAKE PASSWORD */}
+          {/* MODE 2: SELF-REGISTER (FREE INSTANT OR SMS OTP) */}
           {mode === 'register' && (
-            <>
-              {regStep === 'details' ? (
+            <div className="space-y-3.5">
+              {/* Method Switcher: Instant Free (Spark) vs SMS OTP */}
+              <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#060b0e] rounded-xl border border-white/[0.08]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegMethod('free');
+                    setRegStep('details');
+                    setErrorMsg('');
+                    setSuccessMsg('');
+                    clearPhoneRecaptcha('firebase-recaptcha-container');
+                  }}
+                  className={`py-1.5 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                    regMethod === 'free' ? 'bg-emerald-500/20 text-[#14e071] border border-[#14e071]/40' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Instant Free (No SMS Fee)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegMethod('otp');
+                    setRegStep('details');
+                    setErrorMsg('');
+                    setSuccessMsg('');
+                  }}
+                  className={`py-1.5 px-2 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                    regMethod === 'otp' ? 'bg-emerald-500/20 text-[#14e071] border border-[#14e071]/40' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Mobile SMS OTP
+                </button>
+              </div>
+
+              {regMethod === 'free' ? (
+                <form onSubmit={handleFreeRegister} className="space-y-3.5">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-[#14e071]/25 text-[11px] text-emerald-200 flex items-center gap-2">
+                    <Smartphone className="w-4 h-4 text-[#14e071] shrink-0" />
+                    <span>Create your own account free with Mobile Number &amp; Password — works on Spark free plan.</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-slate-300 block">Full Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={regFullName}
+                        onChange={e => {
+                          setRegFullName(e.target.value);
+                          setErrorMsg('');
+                        }}
+                        placeholder="e.g. Rahul Sharma"
+                        className="w-full px-3.5 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-slate-300 block">Username</label>
+                      <input
+                        type="text"
+                        required
+                        value={regUsername}
+                        onChange={e => {
+                          setRegUsername(e.target.value);
+                          setErrorMsg('');
+                        }}
+                        placeholder="e.g. rahul_99"
+                        className="w-full px-3.5 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-300 block">Mobile Number</label>
+                    <div className="flex gap-2">
+                      <select
+                        value={regCountryCode}
+                        onChange={e => setRegCountryCode(e.target.value)}
+                        className="w-28 px-2 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white outline-none"
+                      >
+                        {COUNTRY_CODES.map(c => (
+                          <option key={c.code} value={c.code}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="relative flex-1">
+                        <Smartphone className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                        <input
+                          type="tel"
+                          required
+                          inputMode="tel"
+                          value={regPhone}
+                          onChange={e => {
+                            setRegPhone(e.target.value);
+                            setErrorMsg('');
+                          }}
+                          placeholder="10-digit mobile number"
+                          className="w-full pl-9 pr-3 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-slate-300 block">Create Password</label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                        <input
+                          type={showRegPass ? 'text' : 'password'}
+                          required
+                          minLength={4}
+                          value={regPassword}
+                          onChange={e => {
+                            setRegPassword(e.target.value);
+                            setErrorMsg('');
+                          }}
+                          placeholder="Min 4 chars"
+                          className="w-full pl-9 pr-9 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowRegPass(v => !v)}
+                          className="absolute right-2.5 top-2.5 text-slate-500 hover:text-slate-300 cursor-pointer"
+                        >
+                          {showRegPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-slate-300 block">Confirm Password</label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                        <input
+                          type={showRegPass ? 'text' : 'password'}
+                          required
+                          minLength={4}
+                          value={regConfirmPassword}
+                          onChange={e => {
+                            setRegConfirmPassword(e.target.value);
+                            setErrorMsg('');
+                          }}
+                          placeholder="Re-enter"
+                          className="w-full pl-9 pr-3 py-2.5 bg-[#060b0e] border border-white/[0.1] focus:border-[#14e071] rounded-xl text-xs text-white placeholder-slate-500 outline-none transition"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {errorMsg && (
+                    <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{errorMsg}</span>
+                    </div>
+                  )}
+
+                  {successMsg && (
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[#14e071] text-xs flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{successMsg}</span>
+                    </div>
+                  )}
+
+                  <motion.button
+                    type="submit"
+                    whileTap={{ scale: 0.98 }}
+                    disabled={isLoading}
+                    className="w-full py-3 rounded-xl apex-glow-btn disabled:opacity-60 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <span>{isLoading ? 'Creating Account...' : 'Create Account Free'}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </motion.button>
+                </form>
+              ) : regStep === 'details' ? (
                 <form onSubmit={handleSendRegOtp} className="space-y-3.5">
                   <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-[#14e071]/25 text-[11px] text-emerald-200 flex items-center gap-2">
                     <Smartphone className="w-4 h-4 text-[#14e071] shrink-0" />
-                    <span>Verify your mobile number via SMS OTP, then set your password.</span>
+                    <span>Verify your mobile number via SMS OTP (requires Blaze or Firebase Test Number), then set your password.</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -619,7 +825,7 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
                   </motion.button>
                 </form>
               )}
-            </>
+            </div>
           )}
 
           {/* MODE 3: MAKE / RESET PASSWORD VIA MOBILE OTP */}
@@ -627,9 +833,23 @@ export const UserLogin: React.FC<UserLoginProps> = ({ onGoToAdmin }) => {
             <>
               {resetStep === 'phone' ? (
                 <form onSubmit={handleSendResetOtp} className="space-y-4">
-                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-[#14e071]/25 text-[11px] text-emerald-200 flex items-center gap-2">
-                    <KeyRound className="w-4 h-4 text-[#14e071] shrink-0" />
-                    <span>Enter your registered mobile number to receive an OTP and set a new password.</span>
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-[#14e071]/25 text-[11px] text-emerald-200 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <KeyRound className="w-4 h-4 text-[#14e071] shrink-0 mt-0.5" />
+                      <span>
+                        SMS OTP reset works for <strong>Mobile SMS OTP</strong> accounts (requires Blaze or Firebase Test Numbers).
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/[0.08] text-[10px] text-slate-300">
+                      <span>Using <strong>Instant Free</strong> or Admin ID? Reset free anytime via Admin Chat:</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowIdChat(true)}
+                        className="shrink-0 px-2.5 py-1 rounded-lg bg-[#14e071]/15 hover:bg-[#14e071]/25 border border-[#14e071]/40 text-[#14e071] font-bold cursor-pointer transition"
+                      >
+                        Free Reset Chat
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-1">

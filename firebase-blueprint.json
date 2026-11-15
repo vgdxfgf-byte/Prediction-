@@ -308,7 +308,7 @@
         "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "username": { "type": "string", "minLength": 2, "maxLength": 64 },
         "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "authMethod": { "type": "string", "enum": ["phone_otp", "admin_email"] },
+        "authMethod": { "type": "string", "enum": ["phone_otp", "free_signup", "admin_email"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

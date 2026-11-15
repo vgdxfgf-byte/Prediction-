@@ -29,10 +29,16 @@ service cloud.firestore {
         request.auth.token.phone_number.size() >= 7;
     }
 
+    function isInternalAppEmailUser() {
+      return isSignedIn() &&
+        request.auth.token.email is string &&
+        request.auth.token.email.matches('^[a-z0-9_\\-]+@users\\.apexpredict\\.app$');
+    }
+
     function isAuthenticatedAppUser() {
       return isSignedIn() && (
         request.auth.token.email_verified == true ||
-        (request.auth.token.email is string && request.auth.token.email.matches('^[a-z0-9_\\-]+@users\\.apexpredict\\.app$')) ||
+        isInternalAppEmailUser() ||
         isPhoneVerifiedSelf()
       );
     }
@@ -127,7 +133,7 @@ service cloud.firestore {
         isValidId(data.userId) &&
         data.username is string && data.username.size() >= 2 && data.username.size() <= 64 &&
         isValidId(data.ownerUid) &&
-        (!('authMethod' in data) || data.authMethod in ['phone_otp', 'admin_email']) &&
+        (!('authMethod' in data) || data.authMethod in ['phone_otp', 'free_signup', 'admin_email']) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -348,7 +354,7 @@ service cloud.firestore {
       allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
       allow create: if isValidId(userId) && isValidUser(incoming()) && incoming().id == userId && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
         isAdmin() ||
-        (isPhoneVerifiedSelf() &&
+        ((isPhoneVerifiedSelf() || isInternalAppEmailUser()) &&
           incoming().ownerUid == request.auth.uid &&
           incoming().coins == 0 &&
           incoming().status == 'active' &&
@@ -393,7 +399,7 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isValidId(usernameKey) && isValidAccountClaim(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
         isAdmin() ||
-        (isPhoneVerifiedSelf() &&
+        ((isPhoneVerifiedSelf() || isInternalAppEmailUser()) &&
           incoming().claimedByUid == request.auth.uid &&
           getAfter(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid)
       );
@@ -411,7 +417,7 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isValidId(usernameKey) && isValidUsernameReservation(incoming()) && incoming().id == usernameKey && incoming().createdAt == request.time && (
         isAdmin() ||
-        (isPhoneVerifiedSelf() &&
+        ((isPhoneVerifiedSelf() || isInternalAppEmailUser()) &&
           incoming().ownerUid == request.auth.uid &&
           getAfter(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid)
       );
@@ -423,7 +429,7 @@ service cloud.firestore {
       allow list: if isAdmin();
       allow create: if isValidId(phoneHash) && isValidPhoneAccount(incoming()) && incoming().id == phoneHash && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
         isAdmin() ||
-        (isPhoneVerifiedSelf() &&
+        ((isPhoneVerifiedSelf() || isInternalAppEmailUser()) &&
           incoming().ownerUid == request.auth.uid &&
           getAfter(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid)
       );

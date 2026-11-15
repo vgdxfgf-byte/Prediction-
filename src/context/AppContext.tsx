@@ -38,6 +38,7 @@ import {
   fsAdminDeleteIdChat,
   fsMarkIdChatRead,
   logoutFirebase,
+  registerUserFreeWithPhoneAndPassword,
   seedInitialFirestoreIfNeeded,
   sendPhoneOtpForLoggedInUser,
   sendPhoneOtpForPasswordReset,
@@ -101,6 +102,13 @@ interface AppContextType {
   adminUser: User | null;
   isHydrating: boolean;
   loginUser: (username: string, pass: string) => Promise<ActionResult>;
+  registerFreeWithPhone: (params: {
+    fullName: string;
+    username: string;
+    phone: string;
+    countryCode?: string;
+    password: string;
+  }) => Promise<ActionResult & { userId?: string; username?: string }>;
   sendRegistrationOtp: (params: {
     fullName: string;
     username: string;
@@ -670,6 +678,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true };
   };
 
+  const registerFreeWithPhone = async (params: {
+    fullName: string;
+    username: string;
+    phone: string;
+    countryCode?: string;
+    password: string;
+  }) => {
+    const res = await registerUserFreeWithPhoneAndPassword(params);
+    if (res.success && res.userId) {
+      safeSetStorage(STORAGE_KEYS.USER_DOC_ID, res.userId);
+      setActiveUserId(res.userId);
+      setActivePortal('user');
+    }
+    return res;
+  };
+
   const sendRegistrationOtp = async (params: {
     fullName: string;
     username: string;
@@ -1180,6 +1204,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adminUser,
         isHydrating,
         loginUser,
+        registerFreeWithPhone,
         sendRegistrationOtp,
         completeRegistrationOtp,
         sendPasswordResetOtp,

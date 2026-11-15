@@ -141,17 +141,60 @@ export function clearPhoneRecaptchaVerifier(containerId = 'firebase-recaptcha-co
   }
   if (typeof document !== 'undefined') {
     const el = document.getElementById(containerId);
-    if (el) el.innerHTML = '';
+    if (el) el.replaceChildren();
   }
 }
 
-function createFreshRecaptchaVerifier(containerId = 'firebase-recaptcha-container'): RecaptchaVerifier {
+async function createAndRenderRecaptchaVerifier(
+  containerId = 'firebase-recaptcha-container',
+  size: 'invisible' | 'normal' = 'invisible'
+): Promise<RecaptchaVerifier> {
   clearPhoneRecaptchaVerifier(containerId);
-  const verifier = new RecaptchaVerifier(auth, containerId, {
-    size: 'invisible'
+  if (typeof document === 'undefined') {
+    throw new Error('Phone verification must run in a browser environment');
+  }
+  const host = document.getElementById(containerId);
+  if (!host) {
+    throw new Error('Verification widget container is not ready. Please try again.');
+  }
+  const slot = document.createElement('div');
+  host.replaceChildren(slot);
+
+  auth.languageCode = auth.languageCode || 'en';
+  const verifier = new RecaptchaVerifier(auth, slot, {
+    size
   });
   activeRecaptchaVerifier = verifier;
+  await verifier.render();
   return verifier;
+}
+
+async function runWithPhoneRecaptcha<T>(
+  containerId: string,
+  action: (verifier: RecaptchaVerifier) => Promise<T>
+): Promise<T> {
+  try {
+    const invisibleVerifier = await createAndRenderRecaptchaVerifier(containerId, 'invisible');
+    return await action(invisibleVerifier);
+  } catch (err) {
+    const code = (err as { code?: string })?.code || '';
+    console.error('[Firebase Phone Auth Error]', { code, err });
+    if (
+      code === 'auth/internal-error' ||
+      code === 'auth/captcha-check-failed' ||
+      code === 'auth/invalid-app-credential'
+    ) {
+      // Fallback: render visible 'normal' reCAPTCHA checkbox inside the container in case invisible reCAPTCHA is blocked in an embedded iframe
+      try {
+        const normalVerifier = await createAndRenderRecaptchaVerifier(containerId, 'normal');
+        return await action(normalVerifier);
+      } catch (retryErr) {
+        console.error('[Firebase Phone Auth Normal reCAPTCHA Retry Error]', retryErr);
+        throw retryErr;
+      }
+    }
+    throw err;
+  }
 }
 
 function mapUserDoc(id: string, data: Record<string, unknown>): User {
@@ -404,6 +447,10 @@ function formatAuthError(err: unknown): string {
   }
   if (code === 'auth/too-many-requests') {
     return 'Too many attempts. Please wait a minute and try again.';
+  }
+  if (code === 'auth/internal-error') {
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+    return `Phone OTP verification failed (auth/internal-error). Open the app directly in its own browser tab (outside iframe), ensure "${host}" is in Firebase Console → Authentication → Settings → Authorized domains, and verify Phone SMS billing or a Test Phone Number is set up.`;
   }
   if (code === 'auth/unauthorized-domain') {
     return `This domain (${window.location.hostname}) must be added under Firebase Console → Authentication → Settings → Authorized domains.`;
@@ -722,6 +769,119 @@ export async function signInUserWithCredentials(
   }
 }
 
+export async function registerUserFreeWithPhoneAndPassword(params: {
+  fullName: string;
+  username: string;
+  phone: string;
+  countryCode?: string;
+  password: string;
+}): Promise<{ success: boolean; error?: string; userId?: string; username?: string }> {
+  const cleanFullName = params.fullName.trim();
+  const cleanUsername = normalizeUsername(params.username);
+  const cleanPassword = params.password.trim();
+  const e164Phone = normalizePhoneToE164(params.phone, params.countryCode || '+91');
+
+  if (!cleanFullName || cleanFullName.length < 2) {
+    return { success: false, error: 'Please enter your full name (min 2 characters)' };
+  }
+  if (cleanUsername.length < 2 || cleanUsername.length > 64 || !/^[a-zA-Z0-9_-]+$/.test(cleanUsername)) {
+    return {
+      success: false,
+      error: 'Username must be 2–64 characters and contain only letters, numbers, _ or -'
+    };
+  }
+  if (!e164Phone) {
+    return { success: false, error: 'Please enter a valid mobile number' };
+  }
+  if (cleanPassword.length < 4 || cleanPassword.length > 64) {
+    return { success: false, error: 'Password must be between 4 and 64 characters' };
+  }
+
+  const usernameKey = sanitizeId(cleanUsername.toLowerCase());
+  const phoneHash = await hashPhoneE164(e164Phone);
+
+  try {
+    const usernameSnap = await getDoc(doc(db, 'usernames', usernameKey));
+    if (usernameSnap.exists()) {
+      return { success: false, error: 'Username is already taken. Please choose another username.' };
+    }
+    const phoneSnap = await getDoc(doc(db, 'phone_accounts', phoneHash));
+    if (phoneSnap.exists()) {
+      return {
+        success: false,
+        error: 'This mobile number is already registered. Please Sign In with your mobile number & password.'
+      };
+    }
+
+    const cred = await createUserWithEmailAndPassword(
+      auth,
+      usernameToInternalEmail(cleanUsername),
+      deriveFirebasePassword(cleanPassword)
+    );
+    const authUser = cred.user;
+    const userId = `usr_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'users', userId), {
+      id: userId,
+      username: cleanUsername,
+      fullName: cleanFullName.slice(0, 100),
+      coins: 0,
+      status: 'active',
+      ownerUid: authUser.uid,
+      notes: 'Self-registered (Free Mobile + Password)',
+      lastLogin: new Date().toISOString(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    batch.set(doc(db, 'users', userId, 'private', 'info'), {
+      ownerUid: authUser.uid,
+      email: '',
+      phone: e164Phone.slice(0, 40),
+      updatedAt: serverTimestamp()
+    });
+
+    batch.set(doc(db, 'account_claims', usernameKey), {
+      userId,
+      username: cleanUsername,
+      accessCode: cleanPassword.slice(0, 64),
+      claimedByUid: authUser.uid,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    batch.set(doc(db, 'usernames', usernameKey), {
+      id: usernameKey,
+      username: cleanUsername,
+      userId,
+      ownerUid: authUser.uid,
+      createdAt: serverTimestamp()
+    });
+
+    batch.set(doc(db, 'phone_accounts', phoneHash), {
+      id: phoneHash,
+      userId,
+      username: cleanUsername,
+      ownerUid: authUser.uid,
+      authMethod: 'free_signup',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    try {
+      await batch.commit();
+      return { success: true, userId, username: cleanUsername };
+    } catch (batchErr) {
+      await deleteFirebaseAuthUser(authUser).catch(() => {});
+      await signOut(auth).catch(() => {});
+      throw batchErr;
+    }
+  } catch (err) {
+    return { success: false, error: formatAuthError(err) };
+  }
+}
+
 export async function sendPhoneOtpForRegistration(params: {
   fullName: string;
   username: string;
@@ -768,8 +928,11 @@ export async function sendPhoneOtpForRegistration(params: {
       };
     }
 
-    const verifier = createFreshRecaptchaVerifier(params.recaptchaContainerId || 'firebase-recaptcha-container');
-    const confirmationResult = await signInWithPhoneNumber(auth, e164Phone, verifier);
+    const containerId = params.recaptchaContainerId || 'firebase-recaptcha-container';
+    const confirmationResult = await runWithPhoneRecaptcha(containerId, verifier =>
+      signInWithPhoneNumber(auth, e164Phone, verifier)
+    );
+    clearPhoneRecaptchaVerifier(containerId);
     return {
       success: true,
       confirmationResult,
@@ -962,17 +1125,20 @@ export async function sendPhoneOtpForPasswordReset(params: {
     }
 
     const phoneData = phoneSnap.data();
-    if (phoneData.authMethod === 'admin_email') {
+    if (phoneData.authMethod === 'admin_email' || phoneData.authMethod === 'free_signup') {
       return {
         success: false,
-        error: `This mobile number belongs to Admin-issued account (@${String(
+        error: `Account @${String(
           phoneData.username || 'player'
-        )}). Sign in with your Admin password and link your mobile OTP in Profile → Security, or chat with Admin.`
+        )} was created without SMS OTP. Sign in with your mobile number & password (you can change password in Profile → Security or chat with Admin for a free reset).`
       };
     }
 
-    const verifier = createFreshRecaptchaVerifier(params.recaptchaContainerId || 'firebase-recaptcha-container');
-    const confirmationResult = await signInWithPhoneNumber(auth, e164Phone, verifier);
+    const containerId = params.recaptchaContainerId || 'firebase-recaptcha-container';
+    const confirmationResult = await runWithPhoneRecaptcha(containerId, verifier =>
+      signInWithPhoneNumber(auth, e164Phone, verifier)
+    );
+    clearPhoneRecaptchaVerifier(containerId);
     return {
       success: true,
       confirmationResult,
@@ -1128,10 +1294,13 @@ export async function sendPhoneOtpForLoggedInUser(params: {
       };
     }
 
-    const verifier = createFreshRecaptchaVerifier(params.recaptchaContainerId || 'profile-recaptcha-container');
-    const confirmationResult = currentAuthUser.phoneNumber
-      ? await reauthenticateWithPhoneNumber(currentAuthUser, e164Phone, verifier)
-      : await linkWithPhoneNumber(currentAuthUser, e164Phone, verifier);
+    const containerId = params.recaptchaContainerId || 'profile-recaptcha-container';
+    const confirmationResult = await runWithPhoneRecaptcha(containerId, verifier =>
+      currentAuthUser.phoneNumber
+        ? reauthenticateWithPhoneNumber(currentAuthUser, e164Phone, verifier)
+        : linkWithPhoneNumber(currentAuthUser, e164Phone, verifier)
+    );
+    clearPhoneRecaptchaVerifier(containerId);
 
     return {
       success: true,
