@@ -357,6 +357,7 @@ service cloud.firestore {
       allow get: if isValidId(predictionId);
       allow list: if true;
       allow create: if isAdmin() && isValidId(predictionId) && isValidPrediction(incoming()) &&
+        incoming().minBet >= 500 && incoming().maxBet <= 100000 &&
         incoming().createdAt == request.time && incoming().updatedAt == request.time;
       allow update: if isValidId(predictionId) && isValidPrediction(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
         isAdmin() ||
@@ -377,6 +378,7 @@ service cloud.firestore {
       allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
       allow create: if isAuthenticatedAppUser() && isValidId(betId) && isValidBet(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
+        incoming().amount >= 500 && incoming().amount <= 100000 &&
         incoming().result == 'pending' &&
         incoming().actualWinnings == 0 &&
         incoming().createdAt == request.time &&
@@ -393,6 +395,7 @@ service cloud.firestore {
       allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
       allow create: if isAuthenticatedAppUser() && isValidId(parlayId) && isValidParlayBet(incoming()) &&
         incoming().ownerUid == request.auth.uid &&
+        incoming().amount >= 500 && incoming().amount <= 100000 &&
         incoming().result == 'pending' &&
         incoming().actualWinnings == 0 &&
         incoming().createdAt == request.time &&

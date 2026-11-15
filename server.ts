@@ -48,10 +48,18 @@ function loadOrInitDb(): DatabaseState {
       const raw = fs.readFileSync(DB_PATH, 'utf-8');
       const parsed = JSON.parse(raw) as Partial<DatabaseState>;
       const fallback = createInitialDatabaseState(crypto.randomBytes(32).toString('hex'));
+      const loadedPredictions = (Array.isArray(parsed.predictions) ? parsed.predictions : fallback.predictions).map(p => {
+        const rawMin = Number(p.minBet ?? 500);
+        const rawMax = Number(p.maxBet ?? 100000);
+        const minBet = !Number.isFinite(rawMin) || rawMin < 500 ? 500 : Math.min(100000, rawMin);
+        const maxBet =
+          !Number.isFinite(rawMax) || rawMax < minBet || rawMax <= 10000 || rawMax > 100000 ? 100000 : rawMax;
+        return { ...p, minBet, maxBet };
+      });
       return {
         sessionSecret: parsed.sessionSecret || fallback.sessionSecret,
         users: Array.isArray(parsed.users) && parsed.users.length > 0 ? parsed.users : fallback.users,
-        predictions: Array.isArray(parsed.predictions) ? parsed.predictions : fallback.predictions,
+        predictions: loadedPredictions,
         bets: Array.isArray(parsed.bets) ? parsed.bets : [],
         transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
         deposits: Array.isArray(parsed.deposits) ? parsed.deposits : [],
@@ -379,12 +387,14 @@ async function startServer() {
       res.status(400).json({ success: false, error: 'Prediction closing time has already passed' });
       return;
     }
-    if (betAmount < pred.minBet) {
-      res.status(400).json({ success: false, error: `Minimum prediction is ${pred.minBet} coins` });
+    const effectiveMin = Math.max(500, pred.minBet);
+    const effectiveMax = Math.min(100000, Math.max(effectiveMin, pred.maxBet));
+    if (betAmount < effectiveMin) {
+      res.status(400).json({ success: false, error: `Minimum prediction is ${effectiveMin} coins` });
       return;
     }
-    if (betAmount > pred.maxBet) {
-      res.status(400).json({ success: false, error: `Maximum prediction is ${pred.maxBet} coins` });
+    if (betAmount > effectiveMax) {
+      res.status(400).json({ success: false, error: `Maximum prediction is ${effectiveMax} coins` });
       return;
     }
     if (user.coins < betAmount) {
@@ -854,6 +864,11 @@ async function startServer() {
       return;
     }
 
+    const rawMin = Number(data.minBet);
+    const rawMax = Number(data.maxBet);
+    const minBet = !Number.isFinite(rawMin) || rawMin < 500 ? 500 : Math.min(99999, rawMin);
+    const maxBet = !Number.isFinite(rawMax) || rawMax <= minBet || rawMax > 100000 ? 100000 : rawMax;
+
     const newPred: Prediction = {
       id: `pred_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
       title: data.title.trim(),
@@ -861,8 +876,8 @@ async function startServer() {
       category: data.category || 'Sports',
       yesOdds: Number(data.yesOdds) || 1.9,
       noOdds: Number(data.noOdds) || 1.9,
-      minBet: Number(data.minBet) || 50,
-      maxBet: Number(data.maxBet) || 5000,
+      minBet,
+      maxBet,
       closingTime: data.closingTime || new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
       status: data.status || 'open',
       outcome: null,
@@ -892,8 +907,14 @@ async function startServer() {
     if (data.category) pred.category = data.category;
     if (data.yesOdds !== undefined) pred.yesOdds = Number(data.yesOdds);
     if (data.noOdds !== undefined) pred.noOdds = Number(data.noOdds);
-    if (data.minBet !== undefined) pred.minBet = Number(data.minBet);
-    if (data.maxBet !== undefined) pred.maxBet = Number(data.maxBet);
+    if (data.minBet !== undefined) {
+      const nextMin = Number(data.minBet);
+      if (Number.isFinite(nextMin)) pred.minBet = Math.max(500, Math.min(99999, nextMin));
+    }
+    if (data.maxBet !== undefined) {
+      const nextMax = Number(data.maxBet);
+      if (Number.isFinite(nextMax)) pred.maxBet = Math.min(100000, Math.max(pred.minBet + 1, nextMax));
+    }
     if (typeof data.closingTime === 'string') pred.closingTime = data.closingTime;
     if (data.status) pred.status = data.status;
     if (typeof data.description === 'string') pred.description = data.description.trim();

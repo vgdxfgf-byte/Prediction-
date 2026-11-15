@@ -92,8 +92,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
   const [category, setCategory] = useState<PredictionCategory>('Cricket');
   const [yesOdds, setYesOdds] = useState<number>(1.85);
   const [noOdds, setNoOdds] = useState<number>(2.10);
-  const [minBet, setMinBet] = useState<number>(50);
-  const [maxBet, setMaxBet] = useState<number>(5000);
+  const [minBet, setMinBet] = useState<number>(500);
+  const [maxBet, setMaxBet] = useState<number>(100000);
   const [closingTime, setClosingTime] = useState<string>(
     toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000))
   );
@@ -157,8 +157,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setCategory('Cricket');
     setYesOdds(1.85);
     setNoOdds(2.10);
-    setMinBet(50);
-    setMaxBet(5000);
+    setMinBet(500);
+    setMaxBet(100000);
     setClosingTime(toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
     setDescription('');
     setCricketMatchId('');
@@ -229,8 +229,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       category: 'Cricket',
       yesOdds: s.yesOdds,
       noOdds: s.noOdds,
-      minBet: Number(minBet) > 0 ? Number(minBet) : 50,
-      maxBet: Number(maxBet) > Number(minBet) ? Number(maxBet) : 5000,
+      minBet: Number(minBet) >= 500 && Number(minBet) < 100000 ? Number(minBet) : 500,
+      maxBet: Number(maxBet) > Number(minBet) && Number(maxBet) <= 100000 ? Number(maxBet) : 100000,
       closingTime: closingIso,
       status: 'open',
       description: s.description,
@@ -257,8 +257,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       setFormError('Odds must be strictly greater than 1.00');
       return;
     }
-    if (minBet <= 0 || maxBet <= minBet) {
-      setFormError('Max prediction limit must be strictly greater than min bet');
+    if (minBet < 500 || maxBet > 100000 || maxBet <= minBet) {
+      setFormError('Bet limits must be between 500 and 100,000 coins (with Max > Min)');
       return;
     }
     const closingDate = new Date(closingTime);
@@ -323,8 +323,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       setFormError('Odds must be strictly greater than 1.00');
       return;
     }
-    if (minBet <= 0 || maxBet <= minBet) {
-      setFormError('Max prediction limit must be strictly greater than min bet');
+    if (minBet < 500 || maxBet > 100000 || maxBet <= minBet) {
+      setFormError('Bet limits must be between 500 and 100,000 coins (with Max > Min)');
       return;
     }
     const closingDate = new Date(closingTime);
@@ -550,7 +550,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                       </td>
 
                       <td className="px-4 py-3.5 whitespace-nowrap font-mono text-slate-400">
-                        {pred.minBet} - {pred.maxBet} 🪙
+                        {pred.minBet.toLocaleString()} - {pred.maxBet.toLocaleString()} 🪙
                       </td>
 
                       <td className="px-4 py-3.5 whitespace-nowrap">
@@ -1047,7 +1047,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                   <label className="text-slate-300 font-semibold block">Minimum Bet (Coins)</label>
                   <input
                     type="number"
-                    min="1"
+                    min="500"
+                    max="100000"
                     value={minBet}
                     onChange={e => setMinBet(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono outline-none"
@@ -1058,7 +1059,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                   <label className="text-slate-300 font-semibold block">Maximum Bet (Coins)</label>
                   <input
                     type="number"
-                    min="10"
+                    min="500"
+                    max="100000"
                     value={maxBet}
                     onChange={e => setMaxBet(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono outline-none"
@@ -1230,7 +1232,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                   <label className="text-slate-300 font-semibold block mb-1">Min Bet (Coins):</label>
                   <input
                     type="number"
-                    min="1"
+                    min="500"
+                    max="100000"
                     value={minBet}
                     onChange={e => setMinBet(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono outline-none"
@@ -1240,7 +1243,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                   <label className="text-slate-300 font-semibold block mb-1">Max Bet (Coins):</label>
                   <input
                     type="number"
-                    min="10"
+                    min="500"
+                    max="100000"
                     value={maxBet}
                     onChange={e => setMaxBet(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono outline-none"

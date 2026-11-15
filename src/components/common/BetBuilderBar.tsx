@@ -43,7 +43,7 @@ export const BetBuilderBar: React.FC<BetBuilderBarProps> = ({
     nowMs
   } = useApp();
 
-  const [amount, setAmount] = useState<number>(100);
+  const [amount, setAmount] = useState<number>(500);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [successData, setSuccessData] = useState<{
@@ -76,13 +76,13 @@ export const BetBuilderBar: React.FC<BetBuilderBarProps> = ({
   }, [liveLegs]);
 
   const requiredMin = useMemo(() => {
-    if (liveLegs.length === 0) return 50;
-    return Math.max(...liveLegs.map(l => l.prediction.minBet));
+    if (liveLegs.length === 0) return 500;
+    return Math.max(500, ...liveLegs.map(l => l.prediction.minBet));
   }, [liveLegs]);
 
   const allowedMax = useMemo(() => {
-    if (liveLegs.length === 0) return 5000;
-    return Math.min(...liveLegs.map(l => l.prediction.maxBet));
+    if (liveLegs.length === 0) return 100000;
+    return Math.min(100000, ...liveLegs.map(l => l.prediction.maxBet));
   }, [liveLegs]);
 
   useEffect(() => {
@@ -141,7 +141,7 @@ export const BetBuilderBar: React.FC<BetBuilderBarProps> = ({
       return;
     }
     if (amount < requiredMin || amount > allowedMax) {
-      setErrorMsg(`Stake must be between ${requiredMin} and ${allowedMax} coins.`);
+      setErrorMsg(`Stake must be between ${requiredMin.toLocaleString()} and ${allowedMax.toLocaleString()} coins.`);
       return;
     }
     if (isInsufficient) {
@@ -188,7 +188,7 @@ export const BetBuilderBar: React.FC<BetBuilderBarProps> = ({
       return;
     }
     if (amount < leg.prediction.minBet || amount > leg.prediction.maxBet) {
-      setErrorMsg(`Stake must be between ${leg.prediction.minBet} and ${leg.prediction.maxBet} coins.`);
+      setErrorMsg(`Stake must be between ${leg.prediction.minBet.toLocaleString()} and ${leg.prediction.maxBet.toLocaleString()} coins.`);
       return;
     }
     if (userCoins < amount) {
@@ -494,7 +494,7 @@ export const BetBuilderBar: React.FC<BetBuilderBarProps> = ({
                   <div className="space-y-2">
                     <div className="flex justify-between items-center text-xs">
                       <label className="text-slate-300 font-semibold">
-                        Combo Stake ({requiredMin}–{Math.max(requiredMin, allowedMax)} coins)
+                        Combo Stake ({requiredMin.toLocaleString()}–{Math.max(requiredMin, allowedMax).toLocaleString()} coins)
                       </label>
                       <span className="text-slate-400 font-mono-numbers text-[11px]">
                         Balance: <strong className="text-[#14e071]">{userCoins.toLocaleString()}</strong>
@@ -521,14 +521,14 @@ export const BetBuilderBar: React.FC<BetBuilderBarProps> = ({
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
-                      {[50, 100, 500].map(val => (
+                      {[500, 1000, 5000, 10000].map(val => (
                         <button
                           key={val}
                           type="button"
                           onClick={() => handleQuickAdd(val)}
-                          className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#111b22] hover:bg-[#16242d] text-slate-200 text-xs font-mono-numbers font-semibold border border-white/[0.08] transition cursor-pointer"
+                          className="flex-1 py-1.5 px-2 rounded-lg bg-[#111b22] hover:bg-[#16242d] text-slate-200 text-xs font-mono-numbers font-semibold border border-white/[0.08] transition cursor-pointer"
                         >
-                          +{val}
+                          +{val.toLocaleString()}
                         </button>
                       ))}
                       <button

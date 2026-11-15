@@ -93,7 +93,22 @@ function mapUserDoc(id: string, data: Record<string, unknown>): User {
   };
 }
 
+export const MIN_BET_LIMIT = 500;
+export const MAX_BET_LIMIT = 100000;
+
+export function normalizeBetLimits(minVal: unknown, maxVal: unknown): { minBet: number; maxBet: number } {
+  const rawMin = Number(minVal ?? MIN_BET_LIMIT);
+  const rawMax = Number(maxVal ?? MAX_BET_LIMIT);
+  const minBet = !Number.isFinite(rawMin) || rawMin < MIN_BET_LIMIT ? MIN_BET_LIMIT : Math.min(MAX_BET_LIMIT, rawMin);
+  const maxBet =
+    !Number.isFinite(rawMax) || rawMax < minBet || rawMax <= 10000 || rawMax > MAX_BET_LIMIT
+      ? MAX_BET_LIMIT
+      : rawMax;
+  return { minBet, maxBet };
+}
+
 function mapPredictionDoc(id: string, data: Record<string, unknown>): Prediction {
+  const { minBet, maxBet } = normalizeBetLimits(data.minBet, data.maxBet);
   return {
     id: String(data.id || id),
     title: String(data.title || ''),
@@ -101,8 +116,8 @@ function mapPredictionDoc(id: string, data: Record<string, unknown>): Prediction
     category: data.category as Prediction['category'],
     yesOdds: Number(data.yesOdds ?? 1.9),
     noOdds: Number(data.noOdds ?? 1.9),
-    minBet: Number(data.minBet ?? 50),
-    maxBet: Number(data.maxBet ?? 5000),
+    minBet,
+    maxBet,
     closingTime: String(data.closingTime || new Date().toISOString()),
     status: (data.status as PredictionStatus) || 'open',
     outcome: (data.outcome as Prediction['outcome']) ?? null,
@@ -351,8 +366,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       category: 'Cricket',
       yesOdds: 1.85,
       noOdds: 2.15,
-      minBet: 50,
-      maxBet: 5000,
+      minBet: MIN_BET_LIMIT,
+      maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 24 * 3600 * 1000).toISOString(),
       status: 'open',
       outcome: null,
@@ -373,8 +388,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       category: 'Football',
       yesOdds: 2.1,
       noOdds: 1.78,
-      minBet: 50,
-      maxBet: 10000,
+      minBet: MIN_BET_LIMIT,
+      maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 36 * 3600 * 1000).toISOString(),
       status: 'open',
       outcome: null,
@@ -412,8 +427,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       category: 'Cricket',
       yesOdds: 1.92,
       noOdds: 1.88,
-      minBet: 50,
-      maxBet: 5000,
+      minBet: MIN_BET_LIMIT,
+      maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 18 * 3600 * 1000).toISOString(),
       status: 'open',
       outcome: null,
@@ -433,8 +448,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       category: 'Movies',
       yesOdds: 1.78,
       noOdds: 2.2,
-      minBet: 50,
-      maxBet: 10000,
+      minBet: MIN_BET_LIMIT,
+      maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 48 * 3600 * 1000).toISOString(),
       status: 'open',
       outcome: null,
@@ -454,8 +469,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       category: 'Movies',
       yesOdds: 2.05,
       noOdds: 1.82,
-      minBet: 50,
-      maxBet: 5000,
+      minBet: MIN_BET_LIMIT,
+      maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 42 * 3600 * 1000).toISOString(),
       status: 'open',
       outcome: null,
@@ -473,6 +488,31 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'seedMovieAndCricketMarkets');
     }
+  }
+
+  // Upgrade any existing Firestore prediction documents with legacy limits to 500–100,000
+  try {
+    const allPredsSnap = await getDocs(collection(db, 'predictions'));
+    const toUpgrade = allPredsSnap.docs.filter(d => {
+      const data = d.data();
+      const rawMin = Number(data.minBet ?? 0);
+      const rawMax = Number(data.maxBet ?? 0);
+      return rawMin < MIN_BET_LIMIT || rawMax <= 10000 || rawMax > MAX_BET_LIMIT;
+    });
+    for (let i = 0; i < toUpgrade.length; i += 400) {
+      const upgradeBatch = writeBatch(db);
+      const chunk = toUpgrade.slice(i, i + 400);
+      chunk.forEach(d => {
+        upgradeBatch.update(d.ref, {
+          minBet: MIN_BET_LIMIT,
+          maxBet: MAX_BET_LIMIT,
+          updatedAt: serverTimestamp()
+        });
+      });
+      await upgradeBatch.commit();
+    }
+  } catch (err) {
+    console.warn('Skipping legacy prediction limit normalization:', err);
   }
 }
 
@@ -880,8 +920,10 @@ export async function fsPlaceBet(
   if (isClosingTimePassed(prediction.closingTime)) {
     return { success: false, error: 'Betting is automatically paused — market closing date & time has passed' };
   }
-  if (!Number.isFinite(amount) || amount < prediction.minBet || amount > prediction.maxBet) {
-    return { success: false, error: `Amount must be between ${prediction.minBet} and ${prediction.maxBet}` };
+  const effectiveMin = Math.max(MIN_BET_LIMIT, prediction.minBet);
+  const effectiveMax = Math.min(MAX_BET_LIMIT, Math.max(effectiveMin, prediction.maxBet));
+  if (!Number.isFinite(amount) || amount < effectiveMin || amount > effectiveMax) {
+    return { success: false, error: `Amount must be between ${effectiveMin.toLocaleString()} and ${effectiveMax.toLocaleString()}` };
   }
   if (user.coins < amount) return { success: false, error: 'Insufficient coin balance' };
 
@@ -902,6 +944,9 @@ export async function fsPlaceBet(
   }
   if (isClosingTimePassed(livePred.closingTime)) {
     return { success: false, error: 'Betting is automatically paused — market closing date & time has passed' };
+  }
+  if (amount < livePred.minBet || amount > livePred.maxBet) {
+    return { success: false, error: `Amount must be between ${livePred.minBet.toLocaleString()} and ${livePred.maxBet.toLocaleString()}` };
   }
 
   const nextYesVol = choice === 'YES' ? livePred.totalYesVolume + amount : livePred.totalYesVolume;
@@ -1019,13 +1064,13 @@ export async function fsPlaceParlayBet(
     livePreds.push({ pred: livePred, choice: sel.choice });
   }
 
-  const requiredMin = Math.max(...livePreds.map(item => item.pred.minBet));
-  const allowedMax = Math.min(...livePreds.map(item => item.pred.maxBet));
+  const requiredMin = Math.max(MIN_BET_LIMIT, ...livePreds.map(item => item.pred.minBet));
+  const allowedMax = Math.min(MAX_BET_LIMIT, ...livePreds.map(item => item.pred.maxBet));
   if (amount < requiredMin) {
-    return { success: false, error: `Minimum Bet Builder stake for selected markets is ${requiredMin} coins` };
+    return { success: false, error: `Minimum Bet Builder stake for selected markets is ${requiredMin.toLocaleString()} coins` };
   }
   if (allowedMax >= requiredMin && amount > allowedMax) {
-    return { success: false, error: `Maximum Bet Builder stake for selected markets is ${allowedMax} coins` };
+    return { success: false, error: `Maximum Bet Builder stake for selected markets is ${allowedMax.toLocaleString()} coins` };
   }
 
   const lockedLegs: ParlayLeg[] = livePreds.map(({ pred, choice }) => ({
@@ -1586,6 +1631,8 @@ export async function fsCreatePrediction(
   data: Omit<Prediction, 'id' | 'createdAt' | 'totalYesVolume' | 'totalNoVolume' | 'totalParticipants' | 'outcome'>
 ): Promise<{ success: boolean; error?: string; prediction?: Prediction }> {
   const id = `pred_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const clampedMin = Math.max(MIN_BET_LIMIT, Math.min(MAX_BET_LIMIT - 1, Number(data.minBet) || MIN_BET_LIMIT));
+  const clampedMax = Math.min(MAX_BET_LIMIT, Math.max(clampedMin + 1, Number(data.maxBet) || MAX_BET_LIMIT));
   const payload: Record<string, unknown> = {
     id,
     title: data.title.trim().slice(0, 240),
@@ -1593,8 +1640,8 @@ export async function fsCreatePrediction(
     category: data.category,
     yesOdds: Number(data.yesOdds),
     noOdds: Number(data.noOdds),
-    minBet: Number(data.minBet),
-    maxBet: Number(data.maxBet),
+    minBet: clampedMin,
+    maxBet: clampedMax,
     closingTime: data.closingTime,
     status: data.status || 'open',
     outcome: null,
@@ -1615,6 +1662,8 @@ export async function fsCreatePrediction(
       success: true,
       prediction: {
         ...data,
+        minBet: clampedMin,
+        maxBet: clampedMax,
         id,
         outcome: null,
         totalYesVolume: 0,
@@ -1635,8 +1684,13 @@ export async function fsUpdatePrediction(id: string, data: Partial<Prediction>):
   if (data.category) updates.category = data.category;
   if (typeof data.yesOdds === 'number') updates.yesOdds = data.yesOdds;
   if (typeof data.noOdds === 'number') updates.noOdds = data.noOdds;
-  if (typeof data.minBet === 'number') updates.minBet = data.minBet;
-  if (typeof data.maxBet === 'number') updates.maxBet = data.maxBet;
+  if (typeof data.minBet === 'number') {
+    updates.minBet = Math.max(MIN_BET_LIMIT, Math.min(MAX_BET_LIMIT - 1, data.minBet));
+  }
+  if (typeof data.maxBet === 'number') {
+    const minRef = typeof updates.minBet === 'number' ? updates.minBet : MIN_BET_LIMIT;
+    updates.maxBet = Math.min(MAX_BET_LIMIT, Math.max(minRef + 1, data.maxBet));
+  }
   if (typeof data.closingTime === 'string') updates.closingTime = data.closingTime;
   if (typeof data.description === 'string') updates.description = data.description.slice(0, 1000);
   if (data.status) updates.status = data.status;

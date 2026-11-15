@@ -346,7 +346,7 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({
                       </span>
                     </span>
                     <span className="shrink-0">
-                      {pred.minBet}–{pred.maxBet} coins
+                      {pred.minBet.toLocaleString()}–{pred.maxBet.toLocaleString()} coins
                     </span>
                   </div>
 

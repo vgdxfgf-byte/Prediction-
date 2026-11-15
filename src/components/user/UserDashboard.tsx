@@ -651,7 +651,9 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                           <span>
                             Pool: {(pred.totalYesVolume + pred.totalNoVolume).toLocaleString()} coins
                           </span>
-                          <span>Min: {pred.minBet}</span>
+                          <span>
+                            Limit: {pred.minBet.toLocaleString()}–{pred.maxBet.toLocaleString()}
+                          </span>
                         </div>
 
                         {/* Screen 1 & 2 YES / NO Split Action Buttons */}

@@ -41,7 +41,7 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
 }) => {
   const { currentUser, placeBet, nowMs } = useApp();
   const [choice, setChoice] = useState<'YES' | 'NO'>(initialChoice);
-  const [amount, setAmount] = useState<number>(100);
+  const [amount, setAmount] = useState<number>(500);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [imgFailed, setImgFailed] = useState<boolean>(false);
   const [liveNowMs, setLiveNowMs] = useState<number>(() => Date.now());
@@ -56,7 +56,7 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
   useEffect(() => {
     setChoice(initialChoice);
     if (prediction) {
-      setAmount(Math.max(prediction.minBet, 100));
+      setAmount(Math.max(prediction.minBet, 500));
     }
     setErrorMsg('');
     setImgFailed(false);
@@ -122,11 +122,11 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
       return;
     }
     if (amount < prediction.minBet) {
-      setErrorMsg(`Minimum prediction is ${prediction.minBet} coins`);
+      setErrorMsg(`Minimum prediction is ${prediction.minBet.toLocaleString()} coins`);
       return;
     }
     if (amount > prediction.maxBet) {
-      setErrorMsg(`Maximum prediction is ${prediction.maxBet} coins`);
+      setErrorMsg(`Maximum prediction is ${prediction.maxBet.toLocaleString()} coins`);
       return;
     }
     if (isInsufficient) {
@@ -406,7 +406,9 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
             {/* Enter Amount & Quick Chips */}
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs">
-                <label className="text-slate-300 font-semibold">Enter Amount</label>
+                <label className="text-slate-300 font-semibold">
+                  Enter Amount ({prediction.minBet.toLocaleString()}–{prediction.maxBet.toLocaleString()})
+                </label>
                 <span className="text-slate-400 font-mono-numbers text-[11px]">
                   Balance: <strong className="text-[#14e071]">{userCoins.toLocaleString()}</strong>
                 </span>
@@ -425,7 +427,7 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
                     setErrorMsg('');
                   }}
                   className="w-full bg-[#060b0e] border border-white/[0.12] focus:border-[#14e071] disabled:opacity-50 rounded-xl pl-10 pr-16 py-3 font-mono-numbers text-base font-bold text-white outline-none transition"
-                  placeholder="100"
+                  placeholder={String(prediction.minBet)}
                 />
                 <span className="absolute right-3.5 top-3.5 text-slate-500 font-bold text-[11px] uppercase">
                   Coins
@@ -433,15 +435,15 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
               </div>
 
               <div className="flex flex-wrap gap-1.5">
-                {[50, 100, 500].map(val => (
+                {[500, 1000, 5000, 10000].map(val => (
                   <button
                     key={val}
                     type="button"
                     disabled={isPausedOrClosed}
                     onClick={() => handleQuickAdd(val)}
-                    className="flex-1 py-1.5 px-2.5 rounded-lg bg-[#111b22] hover:bg-[#16242d] disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xs font-mono-numbers font-semibold border border-white/[0.08] transition cursor-pointer"
+                    className="flex-1 py-1.5 px-2 rounded-lg bg-[#111b22] hover:bg-[#16242d] disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xs font-mono-numbers font-semibold border border-white/[0.08] transition cursor-pointer"
                   >
-                    +{val}
+                    +{val.toLocaleString()}
                   </button>
                 ))}
                 <button
@@ -495,7 +497,13 @@ export const BetSlipModal: React.FC<BetSlipModalProps> = ({
             <motion.button
               type="submit"
               whileTap={{ scale: isPausedOrClosed ? 1 : 0.98 }}
-              disabled={isSubmitting || isPausedOrClosed || isInsufficient || amount < prediction.minBet}
+              disabled={
+                isSubmitting ||
+                isPausedOrClosed ||
+                isInsufficient ||
+                amount < prediction.minBet ||
+                amount > prediction.maxBet
+              }
               className="w-full py-3 rounded-xl apex-glow-btn disabled:opacity-50 disabled:cursor-not-allowed font-black text-sm tracking-wide transition cursor-pointer"
             >
               {isSubmitting
