@@ -1,17 +1,22 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { onAuthStateChanged, type User as FirebaseAuthUser } from 'firebase/auth';
+import { onAuthStateChanged, type ConfirmationResult, type User as FirebaseAuthUser } from 'firebase/auth';
 import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { isMarketBettingOpen } from '../utils/marketTiming';
 import {
   BOOTSTRAPPED_ADMIN_EMAIL,
   checkIsFirebaseAdmin,
+  clearPhoneRecaptchaVerifier,
+  completePhoneOtpForLoggedInUser,
+  completePhoneOtpPasswordReset,
+  completePhoneOtpRegistration,
   fsAdjustUserCoins,
   fsChangeOwnPassword,
   fsCreatePrediction,
   fsCreateUser,
   fsDeletePrediction,
   fsDeleteUser,
+  fsGetOwnPrivatePhone,
   fsPlaceBet,
   fsPlaceParlayBet,
   fsRequestDeposit,
@@ -34,6 +39,9 @@ import {
   fsMarkIdChatRead,
   logoutFirebase,
   seedInitialFirestoreIfNeeded,
+  sendPhoneOtpForLoggedInUser,
+  sendPhoneOtpForPasswordReset,
+  sendPhoneOtpForRegistration,
   signInAdminWithGoogle,
   signInUserWithCredentials,
   subscribeAdminPortalData,
@@ -93,6 +101,62 @@ interface AppContextType {
   adminUser: User | null;
   isHydrating: boolean;
   loginUser: (username: string, pass: string) => Promise<ActionResult>;
+  sendRegistrationOtp: (params: {
+    fullName: string;
+    username: string;
+    phone: string;
+    countryCode?: string;
+    recaptchaContainerId?: string;
+  }) => Promise<
+    ActionResult & {
+      confirmationResult?: ConfirmationResult;
+      e164Phone?: string;
+      normalizedUsername?: string;
+    }
+  >;
+  completeRegistrationOtp: (params: {
+    confirmationResult: ConfirmationResult;
+    otpCode: string;
+    fullName: string;
+    username: string;
+    password: string;
+    e164Phone: string;
+  }) => Promise<ActionResult & { userId?: string; username?: string }>;
+  sendPasswordResetOtp: (params: {
+    phone: string;
+    countryCode?: string;
+    recaptchaContainerId?: string;
+  }) => Promise<
+    ActionResult & {
+      confirmationResult?: ConfirmationResult;
+      e164Phone?: string;
+      username?: string;
+    }
+  >;
+  completePasswordResetOtp: (params: {
+    confirmationResult: ConfirmationResult;
+    otpCode: string;
+    newPassword: string;
+    e164Phone: string;
+  }) => Promise<ActionResult & { userId?: string; username?: string }>;
+  sendOwnPhoneOtp: (params: {
+    phone: string;
+    countryCode?: string;
+    recaptchaContainerId?: string;
+  }) => Promise<
+    ActionResult & {
+      confirmationResult?: ConfirmationResult;
+      e164Phone?: string;
+    }
+  >;
+  completeOwnPhoneOtp: (params: {
+    confirmationResult: ConfirmationResult;
+    otpCode: string;
+    newPassword: string;
+    e164Phone: string;
+  }) => Promise<ActionResult>;
+  getOwnPrivatePhone: () => Promise<string>;
+  clearPhoneRecaptcha: (containerId?: string) => void;
   loginAdmin: (username: string, pass: string) => Promise<ActionResult>;
   loginAdminWithGoogle: () => Promise<ActionResult>;
   logout: () => void;
@@ -606,6 +670,90 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { success: true };
   };
 
+  const sendRegistrationOtp = async (params: {
+    fullName: string;
+    username: string;
+    phone: string;
+    countryCode?: string;
+    recaptchaContainerId?: string;
+  }) => {
+    return sendPhoneOtpForRegistration(params);
+  };
+
+  const completeRegistrationOtp = async (params: {
+    confirmationResult: ConfirmationResult;
+    otpCode: string;
+    fullName: string;
+    username: string;
+    password: string;
+    e164Phone: string;
+  }) => {
+    const res = await completePhoneOtpRegistration(params);
+    if (res.success && res.userId) {
+      safeSetStorage(STORAGE_KEYS.USER_DOC_ID, res.userId);
+      setActiveUserId(res.userId);
+      setActivePortal('user');
+    }
+    return res;
+  };
+
+  const sendPasswordResetOtp = async (params: {
+    phone: string;
+    countryCode?: string;
+    recaptchaContainerId?: string;
+  }) => {
+    return sendPhoneOtpForPasswordReset(params);
+  };
+
+  const completePasswordResetOtp = async (params: {
+    confirmationResult: ConfirmationResult;
+    otpCode: string;
+    newPassword: string;
+    e164Phone: string;
+  }) => {
+    const res = await completePhoneOtpPasswordReset(params);
+    if (res.success && res.userId) {
+      safeSetStorage(STORAGE_KEYS.USER_DOC_ID, res.userId);
+      setActiveUserId(res.userId);
+      setActivePortal('user');
+    }
+    return res;
+  };
+
+  const sendOwnPhoneOtp = async (params: {
+    phone: string;
+    countryCode?: string;
+    recaptchaContainerId?: string;
+  }) => {
+    if (!currentUser) return { success: false, error: 'Not signed in' };
+    return sendPhoneOtpForLoggedInUser({
+      user: currentUser,
+      ...params
+    });
+  };
+
+  const completeOwnPhoneOtp = async (params: {
+    confirmationResult: ConfirmationResult;
+    otpCode: string;
+    newPassword: string;
+    e164Phone: string;
+  }) => {
+    if (!currentUser) return { success: false, error: 'Not signed in' };
+    return completePhoneOtpForLoggedInUser({
+      user: currentUser,
+      ...params
+    });
+  };
+
+  const getOwnPrivatePhone = async (): Promise<string> => {
+    if (!currentUser) return '';
+    return fsGetOwnPrivatePhone(currentUser.id);
+  };
+
+  const clearPhoneRecaptcha = (containerId?: string) => {
+    clearPhoneRecaptchaVerifier(containerId);
+  };
+
   const loginAdminWithGoogle = async (): Promise<ActionResult> => {
     const res = await signInAdminWithGoogle();
     if (!res.success || !res.admin) {
@@ -1032,6 +1180,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         adminUser,
         isHydrating,
         loginUser,
+        sendRegistrationOtp,
+        completeRegistrationOtp,
+        sendPasswordResetOtp,
+        completePasswordResetOtp,
+        sendOwnPhoneOtp,
+        completeOwnPhoneOtp,
+        getOwnPrivatePhone,
+        clearPhoneRecaptcha,
         loginAdmin,
         loginAdminWithGoogle,
         logout,

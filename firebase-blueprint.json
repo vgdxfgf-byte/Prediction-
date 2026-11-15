@@ -285,6 +285,34 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "chatId", "senderRole", "senderName", "text", "createdAt"]
+    },
+    "UsernameReservation": {
+      "title": "UsernameReservation",
+      "description": "Non-PII username uniqueness lookup and routing record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 2, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "username", "userId", "ownerUid", "createdAt"]
+    },
+    "PhoneAccount": {
+      "title": "PhoneAccount",
+      "description": "SHA-256 phone hash lookup record for mobile number login and OTP password reset (no raw phone stored).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 16, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "ownerUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "authMethod": { "type": "string", "enum": ["phone_otp", "admin_email"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "username", "ownerUid", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -306,7 +334,15 @@
     },
     "/account_claims/{usernameKey}": {
       "schema": { "$ref": "#/entities/AccountClaim" },
-      "description": "Admin-issued username claim records."
+      "description": "Admin-issued and self-registered username claim records."
+    },
+    "/usernames/{usernameKey}": {
+      "schema": { "$ref": "#/entities/UsernameReservation" },
+      "description": "Non-PII username uniqueness lookup."
+    },
+    "/phone_accounts/{phoneHash}": {
+      "schema": { "$ref": "#/entities/PhoneAccount" },
+      "description": "Hashed mobile number lookup for phone login and OTP password reset."
     },
     "/predictions/{predictionId}": {
       "schema": { "$ref": "#/entities/Prediction" },

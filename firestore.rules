@@ -23,10 +23,17 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isPhoneVerifiedSelf() {
+      return isSignedIn() &&
+        request.auth.token.phone_number is string &&
+        request.auth.token.phone_number.size() >= 7;
+    }
+
     function isAuthenticatedAppUser() {
       return isSignedIn() && (
         request.auth.token.email_verified == true ||
-        (request.auth.token.email is string && request.auth.token.email.matches('^[a-z0-9_\\-]+@users\\.apexpredict\\.app$'))
+        (request.auth.token.email is string && request.auth.token.email.matches('^[a-z0-9_\\-]+@users\\.apexpredict\\.app$')) ||
+        isPhoneVerifiedSelf()
       );
     }
 
@@ -96,6 +103,31 @@ service cloud.firestore {
         data.username is string && data.username.size() >= 2 && data.username.size() <= 64 &&
         data.accessCode is string && data.accessCode.size() >= 4 && data.accessCode.size() <= 64 &&
         isOptionalString(data, 'claimedByUid', 128) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUsernameReservation(data) {
+      return data.keys().hasAll(['id', 'username', 'userId', 'ownerUid', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'username', 'userId', 'ownerUid', 'createdAt']) &&
+        isValidId(data.id) &&
+        data.id.size() >= 2 &&
+        data.id.size() <= 64 &&
+        data.username is string && data.username.size() >= 2 && data.username.size() <= 64 &&
+        isValidId(data.userId) &&
+        isValidId(data.ownerUid) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidPhoneAccount(data) {
+      return data.keys().hasAll(['id', 'userId', 'username', 'ownerUid', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'username', 'ownerUid', 'authMethod', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.id.size() >= 16 &&
+        isValidId(data.userId) &&
+        data.username is string && data.username.size() >= 2 && data.username.size() <= 64 &&
+        isValidId(data.ownerUid) &&
+        (!('authMethod' in data) || data.authMethod in ['phone_otp', 'admin_email']) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -314,7 +346,14 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isValidId(userId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
       allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
-      allow create: if isAdmin() && isValidId(userId) && isValidUser(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow create: if isValidId(userId) && isValidUser(incoming()) && incoming().id == userId && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
+        isAdmin() ||
+        (isPhoneVerifiedSelf() &&
+          incoming().ownerUid == request.auth.uid &&
+          incoming().coins == 0 &&
+          incoming().status == 'active' &&
+          (!('customPaymentGateway' in incoming()) || incoming().customPaymentGateway == null))
+      );
       allow update: if isValidId(userId) && isValidUser(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
         isAdmin() ||
         (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid &&
@@ -333,9 +372,17 @@ service cloud.firestore {
           (isAuthenticatedAppUser() && get(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
         );
         allow list: if isAdmin();
-        allow create, update: if isValidId(userId) && isValidId(docId) && isValidUserPrivateInfo(incoming()) && incoming().updatedAt == request.time && (
+        allow create: if isValidId(userId) && isValidId(docId) && isValidUserPrivateInfo(incoming()) && incoming().updatedAt == request.time && (
           isAdmin() ||
-          (isAuthenticatedAppUser() && get(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
+          (isAuthenticatedAppUser() &&
+            incoming().ownerUid == request.auth.uid &&
+            getAfter(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
+        );
+        allow update: if isValidId(userId) && isValidId(docId) && isValidUserPrivateInfo(incoming()) && incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isAuthenticatedAppUser() &&
+            incoming().ownerUid == request.auth.uid &&
+            get(/databases/$(database)/documents/users/$(userId)).data.ownerUid == request.auth.uid)
         );
         allow delete: if isAdmin() && isValidId(userId) && isValidId(docId);
       }
@@ -344,7 +391,12 @@ service cloud.firestore {
     match /account_claims/{usernameKey} {
       allow get: if isValidId(usernameKey) && (isAdmin() || (isAuthenticatedAppUser() && existing().claimedByUid == request.auth.uid));
       allow list: if isAdmin();
-      allow create: if isAdmin() && isValidId(usernameKey) && isValidAccountClaim(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow create: if isValidId(usernameKey) && isValidAccountClaim(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
+        isAdmin() ||
+        (isPhoneVerifiedSelf() &&
+          incoming().claimedByUid == request.auth.uid &&
+          getAfter(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid)
+      );
       allow update: if isValidId(usernameKey) && isValidAccountClaim(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
         isAdmin() ||
         (isAuthenticatedAppUser() && existing().claimedByUid == request.auth.uid &&
@@ -352,6 +404,38 @@ service cloud.firestore {
           incoming().diff(existing()).affectedKeys().hasOnly(['accessCode', 'updatedAt']))
       );
       allow delete: if isAdmin() && isValidId(usernameKey);
+    }
+
+    match /usernames/{usernameKey} {
+      allow get: if isValidId(usernameKey);
+      allow list: if isAdmin();
+      allow create: if isValidId(usernameKey) && isValidUsernameReservation(incoming()) && incoming().id == usernameKey && incoming().createdAt == request.time && (
+        isAdmin() ||
+        (isPhoneVerifiedSelf() &&
+          incoming().ownerUid == request.auth.uid &&
+          getAfter(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid)
+      );
+      allow update, delete: if isAdmin() && isValidId(usernameKey);
+    }
+
+    match /phone_accounts/{phoneHash} {
+      allow get: if isValidId(phoneHash);
+      allow list: if isAdmin();
+      allow create: if isValidId(phoneHash) && isValidPhoneAccount(incoming()) && incoming().id == phoneHash && incoming().createdAt == request.time && incoming().updatedAt == request.time && (
+        isAdmin() ||
+        (isPhoneVerifiedSelf() &&
+          incoming().ownerUid == request.auth.uid &&
+          getAfter(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid)
+      );
+      allow update: if isValidId(phoneHash) && isValidPhoneAccount(incoming()) && incoming().id == existing().id && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
+        isAdmin() ||
+        (isPhoneVerifiedSelf() &&
+          incoming().ownerUid == request.auth.uid &&
+          existing().ownerUid == request.auth.uid &&
+          incoming().userId == existing().userId &&
+          incoming().username == existing().username)
+      );
+      allow delete: if isAdmin() && isValidId(phoneHash);
     }
 
     match /predictions/{predictionId} {
