@@ -232,6 +232,12 @@ export function buildLiveCricketSessionAnalysis(
   const suggestions: CricketMarketSuggestion[] = [];
   const subtitleBase = `${match.shortName} · ${match.format} · ${match.leagueName}`;
 
+  const startMs = new Date(match.startTime).getTime();
+  const preClosingMinutes =
+    Number.isFinite(startMs) && startMs > Date.now() + 10 * 60 * 1000
+      ? Math.round((startMs - Date.now()) / 60000)
+      : 360;
+
   // 1. Match Winner Suggestion
   const mwOdds = probToYesNoOdds(homeWinProb);
   const matchContext =
@@ -248,7 +254,7 @@ export function buildLiveCricketSessionAnalysis(
     yesOdds: mwOdds.yesOdds,
     noOdds: mwOdds.noOdds,
     yesProbPct: mwOdds.yesProbPct,
-    closingMinutesFromNow: match.status === 'in' ? 120 : 360,
+    closingMinutesFromNow: match.status === 'in' ? 120 : preClosingMinutes,
     description: `Official match result for ${match.name} (${match.leagueName}). Ties/no-result void unless super over decides winner.`,
     liveContext: matchContext
   });
@@ -383,7 +389,7 @@ export function buildLiveCricketSessionAnalysis(
       yesOdds: ppOdds.yesOdds,
       noOdds: ppOdds.noOdds,
       yesProbPct: ppOdds.yesProbPct,
-      closingMinutesFromNow: 240,
+      closingMinutesFromNow: preClosingMinutes,
       description: `Powerplay session line for ${match.name} (${match.format}).`,
       liveContext: `Pre-match line · ${match.format}`
     });
@@ -399,9 +405,24 @@ export function buildLiveCricketSessionAnalysis(
       yesOdds: totalOdds.yesOdds,
       noOdds: totalOdds.noOdds,
       yesProbPct: totalOdds.yesProbPct,
-      closingMinutesFromNow: 300,
+      closingMinutesFromNow: preClosingMinutes,
       description: `1st innings run total over/under for ${match.name}.`,
       liveContext: `Par ${parScore} · ${match.venue}`
+    });
+
+    const preWktOdds = probToYesNoOdds(0.55, 0.05);
+    suggestions.push({
+      id: `${match.id}_pre_pp_wicket`,
+      kind: 'Wicket Session',
+      label: `Powerplay 2+ Wkts`,
+      title: `Will 2 or more wickets fall during the 1st innings Powerplay?`,
+      subtitle: `${match.shortName} · Powerplay Wicket Session`,
+      yesOdds: preWktOdds.yesOdds,
+      noOdds: preWktOdds.noOdds,
+      yesProbPct: preWktOdds.yesProbPct,
+      closingMinutesFromNow: preClosingMinutes,
+      description: `Resolves YES if the bowling team takes at least 2 wickets inside the 1st innings Powerplay overs of ${match.name}.`,
+      liveContext: `Pre-match wicket line · ${match.format}`
     });
   }
 

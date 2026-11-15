@@ -9,7 +9,9 @@ import type {
 } from '../src/types/index.ts';
 
 const ESPN_SCOREBOARD_URL = 'https://site.api.espn.com/apis/v2/scoreboard/header?sport=cricket';
-const CACHE_TTL_MS = 8000;
+const LIVE_CACHE_TTL_MS = 8000;
+const UPCOMING_CACHE_TTL_MS = 120000;
+const UPCOMING_DAYS_AHEAD = 10;
 
 interface RawEspnCompetitor {
   id?: string | number;
@@ -87,13 +89,23 @@ interface MatchesCacheEntry {
   expiresAt: number;
 }
 
+interface UpcomingCacheEntry {
+  matches: LiveCricketMatch[];
+  expiresAt: number;
+}
+
 interface DetailCacheEntry {
   detail: LiveCricketDetail;
   expiresAt: number;
 }
 
 let matchesCache: MatchesCacheEntry | null = null;
+let upcomingCache: UpcomingCacheEntry | null = null;
 const detailCache = new Map<string, DetailCacheEntry>();
+
+function formatEspnDateParam(date: Date): string {
+  return date.toISOString().slice(0, 10).replace(/-/g, '');
+}
 
 async function fetchJsonWithTimeout(url: string, timeoutMs = 8000): Promise<unknown> {
   const controller = new AbortController();
@@ -207,6 +219,53 @@ function normalizeScoreboardEvent(ev: RawEspnEvent, league: RawEspnLeague): Live
   };
 }
 
+async function fetchUpcomingScheduleMatches(forceRefresh = false): Promise<LiveCricketMatch[]> {
+  const now = Date.now();
+  if (!forceRefresh && upcomingCache && now < upcomingCache.expiresAt) {
+    return upcomingCache.matches;
+  }
+
+  const dayUrls: string[] = [];
+  for (let offset = 1; offset <= UPCOMING_DAYS_AHEAD; offset++) {
+    const dt = new Date(now + offset * 86400000);
+    dayUrls.push(`${ESPN_SCOREBOARD_URL}&dates=${formatEspnDateParam(dt)}`);
+  }
+
+  const results = await Promise.allSettled(
+    dayUrls.map(url => fetchJsonWithTimeout(url, 6500))
+  );
+
+  const collected: LiveCricketMatch[] = [];
+  const seen = new Set<string>();
+  let anySucceeded = false;
+
+  for (const res of results) {
+    if (res.status !== 'fulfilled') continue;
+    anySucceeded = true;
+    const payload = res.value as { sports?: Array<{ leagues?: RawEspnLeague[] }> };
+    const leagues = payload?.sports?.[0]?.leagues || [];
+    for (const league of leagues) {
+      for (const ev of league.events || []) {
+        const id = String(ev.id || '');
+        if (!id || seen.has(id)) continue;
+        const normalized = normalizeScoreboardEvent(ev, league);
+        if (normalized.status === 'post') continue;
+        seen.add(id);
+        collected.push(normalized);
+      }
+    }
+  }
+
+  if (anySucceeded) {
+    upcomingCache = {
+      matches: collected,
+      expiresAt: now + UPCOMING_CACHE_TTL_MS
+    };
+  }
+
+  return upcomingCache?.matches || collected;
+}
+
 export async function fetchLiveCricketMatches(forceRefresh = false): Promise<{
   matches: LiveCricketMatch[];
   fetchedAt: string;
@@ -216,11 +275,14 @@ export async function fetchLiveCricketMatches(forceRefresh = false): Promise<{
     return { matches: matchesCache.matches, fetchedAt: matchesCache.fetchedAt };
   }
 
-  const data = (await fetchJsonWithTimeout(ESPN_SCOREBOARD_URL)) as {
-    sports?: Array<{ leagues?: RawEspnLeague[] }>;
-  };
+  const [todayData, upcomingSchedule] = await Promise.all([
+    fetchJsonWithTimeout(ESPN_SCOREBOARD_URL) as Promise<{
+      sports?: Array<{ leagues?: RawEspnLeague[] }>;
+    }>,
+    fetchUpcomingScheduleMatches(forceRefresh).catch(() => upcomingCache?.matches || [])
+  ]);
 
-  const leagues = data?.sports?.[0]?.leagues || [];
+  const leagues = todayData?.sports?.[0]?.leagues || [];
   const allMatches: LiveCricketMatch[] = [];
   const seenIds = new Set<string>();
 
@@ -231,6 +293,12 @@ export async function fetchLiveCricketMatches(forceRefresh = false): Promise<{
       seenIds.add(id);
       allMatches.push(normalizeScoreboardEvent(ev, league));
     }
+  }
+
+  for (const m of upcomingSchedule) {
+    if (!m.id || seenIds.has(m.id)) continue;
+    seenIds.add(m.id);
+    allMatches.push(m);
   }
 
   const rank: Record<LiveCricketStatus, number> = { in: 0, pre: 1, post: 2 };
@@ -251,7 +319,7 @@ export async function fetchLiveCricketMatches(forceRefresh = false): Promise<{
   matchesCache = {
     matches: allMatches,
     fetchedAt,
-    expiresAt: now + CACHE_TTL_MS
+    expiresAt: now + LIVE_CACHE_TTL_MS
   };
 
   return { matches: allMatches, fetchedAt };
@@ -416,7 +484,7 @@ export async function fetchLiveCricketMatchDetail(
 
   detailCache.set(cacheKey, {
     detail,
-    expiresAt: now + CACHE_TTL_MS
+    expiresAt: now + LIVE_CACHE_TTL_MS
   });
 
   return detail;

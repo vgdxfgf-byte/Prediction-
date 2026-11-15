@@ -74,6 +74,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | PredictionStatus>('all');
   const [liveMatchFilter, setLiveMatchFilter] = useState<'in' | 'pre' | 'all'>('in');
+  const [liveFormatFilter, setLiveFormatFilter] = useState<'all' | 'T20' | 'ODI' | 'Test'>('all');
   const [liveMatchSearch, setLiveMatchSearch] = useState('');
   const [quickPublishingId, setQuickPublishingId] = useState<string | null>(null);
   const [createNotice, setCreateNotice] = useState<string | null>(null);
@@ -134,12 +135,16 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
         ? upcomingCricketMatches
         : liveCricketMatches
   ).filter(m => {
+    if (liveFormatFilter !== 'all' && !m.format.toLowerCase().includes(liveFormatFilter.toLowerCase())) {
+      return false;
+    }
     if (!liveMatchSearch.trim()) return true;
     const q = liveMatchSearch.toLowerCase();
     return (
       m.name.toLowerCase().includes(q) ||
       m.shortName.toLowerCase().includes(q) ||
-      m.leagueName.toLowerCase().includes(q)
+      m.leagueName.toLowerCase().includes(q) ||
+      m.venue.toLowerCase().includes(q)
     );
   });
 
@@ -151,7 +156,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       )
     : null;
 
-  const handleOpenCreate = () => {
+  const handleOpenCreate = (initialFilter?: 'in' | 'pre' | 'all') => {
     setTitle('');
     setSubtitle('');
     setCategory('Cricket');
@@ -166,7 +171,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setFormError('');
     setCreateNotice(null);
     setLiveMatchSearch('');
-    setLiveMatchFilter(liveRunningMatches.length > 0 ? 'in' : 'all');
+    setLiveFormatFilter('all');
+    setLiveMatchFilter(initialFilter ?? (liveRunningMatches.length > 0 ? 'in' : 'pre'));
     void refreshCricketMatches();
     setShowCreateModal(true);
   };
@@ -417,17 +423,22 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => {
-              handleOpenCreate();
-              setLiveMatchFilter('in');
-            }}
+            onClick={() => handleOpenCreate('in')}
             className="px-3.5 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/35 text-emerald-300 font-bold text-xs flex items-center gap-2 whitespace-nowrap shrink-0 transition cursor-pointer"
           >
             <Radio className="w-3.5 h-3.5 text-[#14e071]" />
-            <span>Live Cricket ({liveRunningMatches.length} Running)</span>
+            <span>Live ({liveRunningMatches.length})</span>
           </button>
           <button
-            onClick={handleOpenCreate}
+            type="button"
+            onClick={() => handleOpenCreate('pre')}
+            className="px-3.5 py-2.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/35 text-sky-300 font-bold text-xs flex items-center gap-2 whitespace-nowrap shrink-0 transition cursor-pointer"
+          >
+            <Clock className="w-3.5 h-3.5 text-sky-400" />
+            <span>Upcoming ({upcomingCricketMatches.length})</span>
+          </button>
+          <button
+            onClick={() => handleOpenCreate()}
             className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-amber-950/40 whitespace-nowrap shrink-0 transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -756,7 +767,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                   </div>
                 </div>
 
-                {/* Search Matches */}
+                {/* Search & Format Filter */}
                 <div className="flex flex-col sm:flex-row gap-2">
                   <div className="relative flex-1">
                     <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
@@ -764,9 +775,25 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                       type="text"
                       value={liveMatchSearch}
                       onChange={e => setLiveMatchSearch(e.target.value)}
-                      placeholder="Filter live matches or series..."
+                      placeholder="Filter live or upcoming matches, teams, series, venue..."
                       className="w-full pl-8 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 outline-none focus:border-emerald-500"
                     />
+                  </div>
+                  <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-xl border border-slate-800 text-[11px] shrink-0">
+                    {(['all', 'T20', 'ODI', 'Test'] as const).map(fmt => (
+                      <button
+                        key={fmt}
+                        type="button"
+                        onClick={() => setLiveFormatFilter(fmt)}
+                        className={`px-2 py-1.5 rounded-lg font-semibold whitespace-nowrap transition cursor-pointer ${
+                          liveFormatFilter === fmt
+                            ? 'bg-slate-700 text-white'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {fmt === 'all' ? 'All Formats' : fmt}
+                      </button>
+                    ))}
                   </div>
                   {cricketMatchId && (
                     <button
@@ -774,26 +801,30 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                       onClick={() => handleSelectCricketMatch('')}
                       className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 font-semibold whitespace-nowrap cursor-pointer"
                     >
-                      Clear Selected Match
+                      Clear Selected
                     </button>
                   )}
                 </div>
 
-                {/* Live Match List */}
+                {/* Live & Upcoming Match List */}
                 {modalCricketMatches.length === 0 ? (
                   <div className="py-5 text-center text-slate-400 text-[11px] border border-dashed border-slate-800 rounded-xl">
                     {cricketLoading
-                      ? 'Loading live cricket matches...'
+                      ? 'Loading live & 10-day upcoming cricket matches...'
                       : liveMatchFilter === 'in'
-                        ? 'No live running matches found in this filter right now. Switch to Upcoming or All above, or create a custom market below.'
+                        ? 'No live running matches found right now. Switch to Upcoming or All above, or create a custom market below.'
                         : 'No matching cricket fixtures found.'}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
                     {modalCricketMatches.map(m => {
                       const isSelected = cricketMatchId === m.id;
                       const previewAnalysis = buildLiveCricketSessionAnalysis(m);
                       const mw = previewAnalysis.suggestions[0];
+                      const startDate = new Date(m.startTime);
+                      const startLabel = Number.isNaN(startDate.getTime())
+                        ? m.statusText
+                        : `${startDate.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} · ${startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
                       return (
                         <button
                           key={m.id}
@@ -814,11 +845,11 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                                 m.status === 'in'
                                   ? 'text-[#14e071]'
                                   : m.status === 'pre'
-                                    ? 'text-amber-400'
+                                    ? 'text-sky-400'
                                     : 'text-slate-400'
                               }`}
                             >
-                              {m.status === 'in' ? 'LIVE' : m.statusText}
+                              {m.status === 'in' ? 'LIVE' : m.status === 'pre' ? 'UPCOMING' : m.statusText}
                             </span>
                           </div>
 
@@ -828,7 +859,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                                 {m.homeTeam.shortName || m.homeTeam.name}
                               </span>
                               <span className="font-mono font-bold text-slate-200 shrink-0">
-                                {m.homeTeam.score || '—'}
+                                {m.homeTeam.score || (m.status === 'pre' ? 'Pre-match' : '—')}
                               </span>
                             </div>
                             <div className="flex items-center justify-between gap-2">
@@ -836,13 +867,15 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                                 {m.awayTeam.shortName || m.awayTeam.name}
                               </span>
                               <span className="font-mono font-bold text-slate-200 shrink-0">
-                                {m.awayTeam.score || '—'}
+                                {m.awayTeam.score || (m.status === 'pre' ? 'Pre-match' : '—')}
                               </span>
                             </div>
                           </div>
 
                           <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-[10px]">
-                            <span className="text-slate-400 truncate">{m.statusSummary}</span>
+                            <span className="text-slate-400 truncate">
+                              {m.status === 'pre' ? startLabel : m.statusSummary}
+                            </span>
                             {mw && (
                               <span className="font-mono text-emerald-300 font-bold shrink-0">
                                 {mw.yesOdds.toFixed(2)}x / {mw.noOdds.toFixed(2)}x
