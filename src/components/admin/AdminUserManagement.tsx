@@ -912,24 +912,48 @@ export const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
                                   </div>
                                 </div>
 
-                                {dep.status === 'pending' && (
-                                  <div className="flex items-center gap-1.5 shrink-0">
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {dep.proofImageUrl && (
                                     <button
                                       type="button"
-                                      onClick={() => reviewDeposit(dep.id, 'approve')}
-                                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] cursor-pointer"
+                                      onClick={() =>
+                                        setLightboxImage({
+                                          url: dep.proofImageUrl!,
+                                          title: `Deposit Screenshot · @${dep.username} (${dep.amount.toLocaleString()} coins · Ref ${dep.referenceNumber})`
+                                        })
+                                      }
+                                      className="relative group rounded-lg overflow-hidden border border-emerald-500/40 w-8 h-8 shrink-0 cursor-pointer"
+                                      title="View user payment screenshot"
                                     >
-                                      Approve
+                                      <img
+                                        src={dep.proofImageUrl}
+                                        alt="Deposit screenshot"
+                                        className="w-full h-full object-cover"
+                                      />
+                                      <span className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                        <ZoomIn className="w-3 h-3 text-white" />
+                                      </span>
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setRejectItem({ type: 'deposit', id: dep.id, user: dep.username, amount: dep.amount })}
-                                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-400 text-[11px] cursor-pointer"
-                                    >
-                                      Reject
-                                    </button>
-                                  </div>
-                                )}
+                                  )}
+                                  {dep.status === 'pending' && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => reviewDeposit(dep.id, 'approve')}
+                                        className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] cursor-pointer"
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setRejectItem({ type: 'deposit', id: dep.id, user: dep.username, amount: dep.amount })}
+                                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-400 text-[11px] cursor-pointer"
+                                      >
+                                        Reject
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
                               </div>
                             );
                           }

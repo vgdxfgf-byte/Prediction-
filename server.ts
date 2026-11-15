@@ -456,8 +456,10 @@ async function startServer() {
     res.json({ success: true, betId, state: getUserStatePayload(user.id) });
   });
 
+  const PROOF_DATA_URL_RE = /^data:image\/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+
   app.post('/api/user/deposits', requireUser, async (req: AuthedRequest, res) => {
-    const { amount, paymentMethod, referenceNumber, notes } = req.body || {};
+    const { amount, paymentMethod, referenceNumber, notes, proofImageUrl } = req.body || {};
     const user = db.users.find(u => u.id === req.auth!.uid);
     if (!user) {
       res.status(404).json({ success: false, error: 'User not found' });
@@ -472,6 +474,14 @@ async function startServer() {
       res.status(400).json({ success: false, error: 'Payment reference number is required' });
       return;
     }
+    if (
+      typeof proofImageUrl === 'string' &&
+      proofImageUrl.length > 0 &&
+      (proofImageUrl.length > 500000 || !PROOF_DATA_URL_RE.test(proofImageUrl))
+    ) {
+      res.status(400).json({ success: false, error: 'Invalid or oversized payment screenshot' });
+      return;
+    }
 
     const newDeposit: DepositRequest = {
       id: `dep_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
@@ -481,6 +491,7 @@ async function startServer() {
       paymentMethod: typeof paymentMethod === 'string' && paymentMethod.trim() ? paymentMethod.trim() : 'UPI Transfer',
       referenceNumber: referenceNumber.trim(),
       notes: typeof notes === 'string' ? notes.trim() : '',
+      ...(typeof proofImageUrl === 'string' && proofImageUrl.length > 0 ? { proofImageUrl } : {}),
       status: 'pending',
       createdAt: new Date().toISOString()
     };
@@ -488,6 +499,26 @@ async function startServer() {
 
     await persistDb();
     res.json({ success: true, state: getUserStatePayload(user.id) });
+  });
+
+  app.patch('/api/user/deposits/:id/proof', requireUser, async (req: AuthedRequest, res) => {
+    const { proofImageUrl } = req.body || {};
+    const dep = db.deposits.find(d => d.id === req.params.id && d.userId === req.auth!.uid);
+    if (!dep) {
+      res.status(404).json({ success: false, error: 'Deposit request not found' });
+      return;
+    }
+    if (dep.status !== 'pending') {
+      res.status(400).json({ success: false, error: 'Screenshots can only be uploaded on pending deposits' });
+      return;
+    }
+    if (typeof proofImageUrl !== 'string' || proofImageUrl.length > 500000 || !PROOF_DATA_URL_RE.test(proofImageUrl)) {
+      res.status(400).json({ success: false, error: 'Invalid or oversized payment screenshot' });
+      return;
+    }
+    dep.proofImageUrl = proofImageUrl;
+    await persistDb();
+    res.json({ success: true, state: getUserStatePayload(req.auth!.uid) });
   });
 
   app.post('/api/user/withdrawals', requireUser, async (req: AuthedRequest, res) => {

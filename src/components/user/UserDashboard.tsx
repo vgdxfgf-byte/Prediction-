@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useApp } from '../../context/AppContext';
-import { Prediction, WithdrawalRequest } from '../../types';
+import { DepositRequest, Prediction, WithdrawalRequest } from '../../types';
 import cricketHeroImg from '../../assets/images/hero_cricket_stadium_1794598510096.jpg';
 import cinemaHeroImg from '../../assets/images/hero_cinema_premiere_1794598510861.jpg';
 import {
@@ -68,6 +68,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     parlayBets,
     transactions,
     predictions,
+    deposits,
     withdrawals,
     nowMs,
     builderSelections,
@@ -77,6 +78,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   const [heroSlide, setHeroSlide] = useState<'cricket' | 'movies'>('cricket');
   const [heroImgError, setHeroImgError] = useState<Record<string, boolean>>({});
   const [viewingProofWithdrawal, setViewingProofWithdrawal] = useState<WithdrawalRequest | null>(null);
+  const [viewingProofDeposit, setViewingProofDeposit] = useState<DepositRequest | null>(null);
 
   const allOpenMarkets = predictions.filter(p => isMarketBettingOpen(p, nowMs));
 
@@ -128,6 +130,10 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
     lostBets.reduce((sum, b) => sum + b.amount, 0) +
     lostParlays.reduce((sum, p) => sum + p.amount, 0);
 
+  const userDeposits = deposits.filter(
+    d => d.userId === currentUser.id || (d.ownerUid && currentUser.ownerUid && d.ownerUid === currentUser.ownerUid)
+  );
+  const depositById = new Map(userDeposits.map(d => [d.id, d]));
   const userWithdrawals = withdrawals.filter(
     w => w.userId === currentUser.id || (w.ownerUid && currentUser.ownerUid && w.ownerUid === currentUser.ownerUid)
   );
@@ -1096,6 +1102,20 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                                 Proof
                               </button>
                             )}
+                            {(() => {
+                              const linkedDep =
+                                tx.type === 'deposit' && tx.referenceId ? depositById.get(tx.referenceId) : undefined;
+                              return linkedDep?.proofImageUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingProofDeposit(linkedDep)}
+                                  className="ml-1 px-1.5 py-0.2 rounded bg-emerald-500/15 text-[#14e071] border border-[#14e071]/35 font-semibold inline-flex items-center gap-0.5 cursor-pointer"
+                                >
+                                  <ImageIcon className="w-2.5 h-2.5" />
+                                  Proof
+                                </button>
+                              ) : null;
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -1185,6 +1205,73 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               >
                 <Download className="w-3.5 h-3.5" />
                 Download Receipt
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DEPOSIT SCREENSHOT LIGHTBOX MODAL */}
+      {viewingProofDeposit && viewingProofDeposit.proofImageUrl && (
+        <div
+          onClick={() => setViewingProofDeposit(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-fade-in"
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-xl bg-[#0a1116] border border-[#14e071]/35 rounded-2xl overflow-hidden shadow-2xl text-xs"
+          >
+            <div className="px-4 py-3 border-b border-white/[0.08] bg-[#070c10] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-bold text-sm text-white flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-[#14e071] shrink-0" />
+                  <span className="truncate">Deposit Payment Screenshot</span>
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono-numbers truncate">
+                  {viewingProofDeposit.amount.toLocaleString()} Coins · {viewingProofDeposit.paymentMethod} (Ref: {viewingProofDeposit.referenceNumber})
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingProofDeposit(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.08] cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-black flex items-center justify-center max-h-[68vh]">
+              <img
+                src={viewingProofDeposit.proofImageUrl}
+                alt="Deposit payment screenshot"
+                className="max-h-[62vh] w-auto object-contain rounded-lg"
+              />
+            </div>
+
+            <div className="px-4 py-3 border-t border-white/[0.08] bg-[#070c10] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="text-[11px] text-slate-400">
+                {viewingProofDeposit.adminRemark && (
+                  <div className="text-amber-300 font-medium">
+                    Remark: {viewingProofDeposit.adminRemark}
+                  </div>
+                )}
+                <div>
+                  Submitted:{' '}
+                  {new Date(viewingProofDeposit.createdAt).toLocaleString([], {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
+              </div>
+              <a
+                href={viewingProofDeposit.proofImageUrl}
+                download={`deposit-proof-${viewingProofDeposit.id}.jpg`}
+                className="px-3.5 py-2 rounded-xl apex-glow-btn font-bold text-xs flex items-center justify-center gap-1.5 shrink-0"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download Screenshot
               </a>
             </div>
           </div>

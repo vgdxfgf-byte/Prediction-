@@ -177,6 +177,7 @@
         "reviewedAt": { "type": "string", "maxLength": 64 },
         "reviewedBy": { "type": "string", "maxLength": 64 },
         "adminRemark": { "type": "string", "maxLength": 400 },
+        "proofImageUrl": { "type": "string", "maxLength": 500000 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

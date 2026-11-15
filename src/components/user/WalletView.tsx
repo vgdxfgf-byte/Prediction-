@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
-import type { WithdrawalRequest } from '../../types';
+import type { DepositRequest, WithdrawalRequest } from '../../types';
+import { compressChatImage } from '../../utils/imageCompression';
 import { 
   Coins, 
   ArrowDownLeft, 
@@ -19,6 +20,7 @@ import {
   Wallet as WalletIcon,
   Search,
   Image as ImageIcon,
+  ImagePlus,
   ZoomIn,
   Download,
   X
@@ -37,7 +39,16 @@ export const WalletView: React.FC<WalletViewProps> = ({
   initialTab,
   onClearInitialTab
 }) => {
-  const { currentUser, transactions, deposits, withdrawals, requestDeposit, requestWithdrawal, getEffectivePaymentGateway } = useApp();
+  const {
+    currentUser,
+    transactions,
+    deposits,
+    withdrawals,
+    requestDeposit,
+    uploadDepositProof,
+    requestWithdrawal,
+    getEffectivePaymentGateway
+  } = useApp();
 
   const [activeTab, setActiveTab] = useState<'transactions' | 'deposits' | 'withdrawals'>(initialTab || 'transactions');
   const [txTypeFilter, setTxTypeFilter] = useState<'all' | 'wins' | 'bets' | 'deposits' | 'withdrawals' | 'admin'>('all');
@@ -67,8 +78,17 @@ export const WalletView: React.FC<WalletViewProps> = ({
   const [depMethod, setDepMethod] = useState<string>('UPI Transfer / PhonePe');
   const [depRef, setDepRef] = useState<string>('');
   const [depNotes, setDepNotes] = useState<string>('');
+  const [depProofImage, setDepProofImage] = useState<string | null>(null);
+  const [depProofProcessing, setDepProofProcessing] = useState<boolean>(false);
   const [depSuccessMsg, setDepSuccessMsg] = useState<string>('');
   const [depError, setDepError] = useState<string>('');
+  const depFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Attach/update screenshot on existing pending deposit
+  const [targetUploadDeposit, setTargetUploadDeposit] = useState<DepositRequest | null>(null);
+  const [uploadingDepositId, setUploadingDepositId] = useState<string | null>(null);
+  const [depositListNotice, setDepositListNotice] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const existingDepFileInputRef = useRef<HTMLInputElement>(null);
 
   // Withdrawal Form State
   const [wdrAmount, setWdrAmount] = useState<number>(200);
@@ -79,6 +99,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
 
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [viewingProofWithdrawal, setViewingProofWithdrawal] = useState<WithdrawalRequest | null>(null);
+  const [viewingProofDeposit, setViewingProofDeposit] = useState<DepositRequest | null>(null);
 
   if (!currentUser) return null;
 
@@ -105,6 +126,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
     w => w.userId === currentUser.id || (w.ownerUid && currentUser.ownerUid && w.ownerUid === currentUser.ownerUid)
   );
   const withdrawalById = new Map(userWithdrawals.map(w => [w.id, w]));
+  const depositById = new Map(userDeposits.map(d => [d.id, d]));
   const withdrawalsWithProofCount = userWithdrawals.filter(w => Boolean(w.proofImageUrl)).length;
   const effectiveGateway = getEffectivePaymentGateway(currentUser.id);
   const enabledGatewayChannels = effectiveGateway.channels.filter(c => c.enabled);
@@ -113,6 +135,49 @@ export const WalletView: React.FC<WalletViewProps> = ({
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const handleDepFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setDepError('');
+    setDepProofProcessing(true);
+    try {
+      const compressed = await compressChatImage(file);
+      setDepProofImage(compressed);
+    } catch (err) {
+      setDepError(err instanceof Error ? err.message : 'Unable to process payment screenshot');
+    } finally {
+      setDepProofProcessing(false);
+    }
+  };
+
+  const handleExistingDepFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    const dep = targetUploadDeposit;
+    setTargetUploadDeposit(null);
+    if (!file || !dep) return;
+
+    setDepositListNotice(null);
+    setUploadingDepositId(dep.id);
+    try {
+      const compressed = await compressChatImage(file);
+      const res = await uploadDepositProof(dep.id, compressed);
+      if (res.success) {
+        setDepositListNotice({ type: 'ok', text: `Payment screenshot uploaded for Ref ${dep.referenceNumber}.` });
+      } else {
+        setDepositListNotice({ type: 'err', text: res.error || 'Failed to upload screenshot' });
+      }
+    } catch (err) {
+      setDepositListNotice({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Unable to process screenshot'
+      });
+    } finally {
+      setUploadingDepositId(null);
+    }
   };
 
   const handleDepositSubmit = async (e: React.FormEvent) => {
@@ -126,12 +191,17 @@ export const WalletView: React.FC<WalletViewProps> = ({
       setDepError('Payment Reference ID or Transaction Number is required');
       return;
     }
+    if (depProofProcessing) {
+      setDepError('Please wait for the screenshot to finish processing');
+      return;
+    }
 
-    const res = await requestDeposit(depAmount, depMethod, depRef, depNotes);
+    const res = await requestDeposit(depAmount, depMethod, depRef, depNotes, depProofImage || undefined);
     if (res.success) {
       setDepSuccessMsg(`Deposit request for ${depAmount} coins submitted! Awaiting admin verification.`);
       setDepRef('');
       setDepNotes('');
+      setDepProofImage(null);
       setTimeout(() => {
         setShowDepositModal(false);
         setDepSuccessMsg('');
@@ -406,6 +476,20 @@ export const WalletView: React.FC<WalletViewProps> = ({
                               Proof
                             </button>
                           )}
+                          {(() => {
+                            const linkedDep =
+                              tx.type === 'deposit' && tx.referenceId ? depositById.get(tx.referenceId) : undefined;
+                            return linkedDep?.proofImageUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setViewingProofDeposit(linkedDep)}
+                                className="px-2 py-0.5 rounded bg-emerald-500/15 text-[#14e071] border border-[#14e071]/35 font-semibold flex items-center gap-1 cursor-pointer"
+                              >
+                                <ImageIcon className="w-3 h-3" />
+                                Proof
+                              </button>
+                            ) : null;
+                          })()}
                           <span>
                             {new Date(tx.createdAt).toLocaleDateString([], {
                               month: 'short',
@@ -484,6 +568,20 @@ export const WalletView: React.FC<WalletViewProps> = ({
                                     View Proof
                                   </button>
                                 )}
+                                {(() => {
+                                  const linkedDep =
+                                    tx.type === 'deposit' && tx.referenceId ? depositById.get(tx.referenceId) : undefined;
+                                  return linkedDep?.proofImageUrl ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setViewingProofDeposit(linkedDep)}
+                                      className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-[#14e071] border border-[#14e071]/35 text-[10px] font-semibold flex items-center gap-1 shrink-0 cursor-pointer transition"
+                                    >
+                                      <ImageIcon className="w-3 h-3" />
+                                      View Proof
+                                    </button>
+                                  ) : null;
+                                })()}
                               </div>
                             </td>
                             <td
@@ -540,6 +638,33 @@ export const WalletView: React.FC<WalletViewProps> = ({
       {/* Tab 2: Deposit Requests */}
       {activeTab === 'deposits' && (
         <div className="space-y-3">
+          <input
+            ref={existingDepFileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleExistingDepFileChange}
+            className="hidden"
+          />
+
+          {depositListNotice && (
+            <div
+              className={`p-3 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                depositListNotice.type === 'ok'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              }`}
+            >
+              <span>{depositListNotice.text}</span>
+              <button
+                type="button"
+                onClick={() => setDepositListNotice(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {userDeposits.length === 0 ? (
             <div className="bg-slate-900/60 p-10 rounded-2xl border border-slate-800 text-center space-y-2">
               <Clock className="w-8 h-8 text-slate-600 mx-auto" />
@@ -554,57 +679,129 @@ export const WalletView: React.FC<WalletViewProps> = ({
                 const isApproved = dep.status === 'approved';
                 const isRejected = dep.status === 'rejected';
                 const isPending = dep.status === 'pending';
+                const isUploading = uploadingDepositId === dep.id;
 
                 return (
                   <div
                     key={dep.id}
-                    className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3 text-xs"
                   >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-white text-sm">
-                          🪙 {dep.amount.toLocaleString()} Coins Requested
-                        </span>
-                        <span className="text-slate-400 font-mono text-[11px]">
-                          ({dep.paymentMethod})
-                        </span>
-                      </div>
-                      <div className="text-slate-400">
-                        Reference Number: <strong className="text-slate-200 font-mono">{dep.referenceNumber}</strong>
-                      </div>
-                      {dep.notes && <div className="text-slate-500">Note: {dep.notes}</div>}
-                      {dep.adminRemark && (
-                        <div className="text-amber-400 text-[11px] font-medium">
-                          Admin Remark: {dep.adminRemark}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white text-sm">
+                            🪙 {dep.amount.toLocaleString()} Coins Requested
+                          </span>
+                          <span className="text-slate-400 font-mono text-[11px]">
+                            ({dep.paymentMethod})
+                          </span>
                         </div>
-                      )}
+                        <div className="text-slate-400">
+                          Reference Number: <strong className="text-slate-200 font-mono">{dep.referenceNumber}</strong>
+                        </div>
+                        {dep.notes && <div className="text-slate-500">Note: {dep.notes}</div>}
+                        {dep.adminRemark && (
+                          <div className="text-amber-400 text-[11px] font-medium">
+                            Admin Remark: {dep.adminRemark}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-800">
+                        <div>
+                          {isPending && (
+                            <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5 animate-pulse" />
+                              Pending Admin Review
+                            </span>
+                          )}
+                          {isApproved && (
+                            <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Approved & Credited
+                            </span>
+                          )}
+                          {isRejected && (
+                            <span className="px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 text-xs font-bold flex items-center gap-1">
+                              <XCircle className="w-3.5 h-3.5" />
+                              Rejected
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-slate-500 text-[10px]">
+                          {new Date(dep.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-800">
-                      <div>
-                        {isPending && (
-                          <span className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold flex items-center gap-1">
-                            <Clock className="w-3.5 h-3.5 animate-pulse" />
-                            Pending Admin Review
-                          </span>
+                    {(dep.proofImageUrl || isPending) && (
+                      <div className="pt-2.5 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        {dep.proofImageUrl ? (
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setViewingProofDeposit(dep)}
+                              className="relative group w-16 h-12 rounded-lg overflow-hidden border border-emerald-500/40 bg-slate-950 shrink-0 cursor-pointer"
+                              title="View uploaded payment screenshot"
+                            >
+                              <img
+                                src={dep.proofImageUrl}
+                                alt="Deposit payment screenshot"
+                                className="w-full h-full object-cover"
+                              />
+                              <span className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                <ZoomIn className="w-4 h-4 text-white" />
+                              </span>
+                            </button>
+                            <div>
+                              <div className="font-bold text-emerald-400 flex items-center gap-1.5">
+                                <ImageIcon className="w-3.5 h-3.5" />
+                                Payment Screenshot Attached
+                              </div>
+                              <div className="text-[11px] text-slate-400">
+                                Visible to admin for faster verification.
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                            <ImagePlus className="w-3.5 h-3.5 text-slate-500" />
+                            <span>No payment screenshot attached yet.</span>
+                          </div>
                         )}
-                        {isApproved && (
-                          <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Approved & Credited
-                          </span>
-                        )}
-                        {isRejected && (
-                          <span className="px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 text-xs font-bold flex items-center gap-1">
-                            <XCircle className="w-3.5 h-3.5" />
-                            Rejected
-                          </span>
-                        )}
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {dep.proofImageUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setViewingProofDeposit(dep)}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-[#14e071] border border-[#14e071]/40 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                            >
+                              <ZoomIn className="w-3.5 h-3.5" />
+                              View Screenshot
+                            </button>
+                          )}
+                          {isPending && (
+                            <button
+                              type="button"
+                              disabled={isUploading}
+                              onClick={() => {
+                                setTargetUploadDeposit(dep);
+                                existingDepFileInputRef.current?.click();
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition"
+                            >
+                              <Upload className="w-3.5 h-3.5" />
+                              {isUploading
+                                ? 'Uploading...'
+                                : dep.proofImageUrl
+                                  ? 'Update Screenshot'
+                                  : 'Upload Screenshot'}
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-slate-500 text-[10px]">
-                        {new Date(dep.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
+                    )}
                   </div>
                 );
               })}
@@ -877,6 +1074,64 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   />
                 </div>
 
+                {/* Payment Screenshot Upload (Optional) */}
+                <div className="space-y-1.5">
+                  <label className="text-slate-300 font-semibold block">
+                    Payment Screenshot (Optional):
+                  </label>
+                  <input
+                    ref={depFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleDepFileChange}
+                    className="hidden"
+                  />
+                  {depProofImage ? (
+                    <div className="space-y-2">
+                      <div className="relative rounded-xl overflow-hidden border border-emerald-500/35 bg-slate-950 max-h-44 flex items-center justify-center">
+                        <img
+                          src={depProofImage}
+                          alt="Deposit payment screenshot preview"
+                          className="max-h-44 w-auto object-contain"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={depProofProcessing}
+                          onClick={() => depFileInputRef.current?.click()}
+                          className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          {depProofProcessing ? 'Processing...' : 'Change Screenshot'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDepProofImage(null)}
+                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-300 font-semibold transition cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={depProofProcessing}
+                      onClick={() => depFileInputRef.current?.click()}
+                      className="w-full py-4 px-4 rounded-xl border-2 border-dashed border-slate-700 hover:border-emerald-500/60 bg-slate-950/70 hover:bg-slate-950 text-slate-300 flex flex-col items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <ImagePlus className="w-5 h-5 text-emerald-400" />
+                      <span className="font-semibold">
+                        {depProofProcessing ? 'Compressing screenshot...' : 'Click to upload payment screenshot'}
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        JPG, PNG, or WebP · Helps admin verify your payment faster
+                      </span>
+                    </button>
+                  )}
+                </div>
+
                 {/* Notes */}
                 <div className="space-y-1">
                   <label className="text-slate-400 block">
@@ -903,6 +1158,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     type="button"
                     onClick={() => {
                       setShowDepositModal(false);
+                      setDepProofImage(null);
                       onClearInitialModal?.();
                     }}
                     className="w-1/3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
@@ -911,7 +1167,8 @@ export const WalletView: React.FC<WalletViewProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase tracking-wider shadow-lg shadow-emerald-950/40"
+                    disabled={depProofProcessing}
+                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold uppercase tracking-wider shadow-lg shadow-emerald-950/40"
                   >
                     Submit Deposit Request
                   </button>
@@ -1114,6 +1371,73 @@ export const WalletView: React.FC<WalletViewProps> = ({
               >
                 <Download className="w-3.5 h-3.5" />
                 Download Receipt
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DEPOSIT SCREENSHOT LIGHTBOX MODAL */}
+      {viewingProofDeposit && viewingProofDeposit.proofImageUrl && (
+        <div
+          onClick={() => setViewingProofDeposit(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-fade-in"
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-xl bg-[#0a1116] border border-[#14e071]/35 rounded-2xl overflow-hidden shadow-2xl text-xs"
+          >
+            <div className="px-4 py-3 border-b border-white/[0.08] bg-[#070c10] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-bold text-sm text-white flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-[#14e071] shrink-0" />
+                  <span className="truncate">Deposit Payment Screenshot</span>
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono-numbers truncate">
+                  {viewingProofDeposit.amount.toLocaleString()} Coins · {viewingProofDeposit.paymentMethod} (Ref: {viewingProofDeposit.referenceNumber})
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingProofDeposit(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.08] cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-black flex items-center justify-center max-h-[68vh]">
+              <img
+                src={viewingProofDeposit.proofImageUrl}
+                alt="Deposit payment screenshot"
+                className="max-h-[62vh] w-auto object-contain rounded-lg"
+              />
+            </div>
+
+            <div className="px-4 py-3 border-t border-white/[0.08] bg-[#070c10] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="text-[11px] text-slate-400">
+                {viewingProofDeposit.adminRemark && (
+                  <div className="text-amber-300 font-medium">
+                    Remark: {viewingProofDeposit.adminRemark}
+                  </div>
+                )}
+                <div>
+                  Submitted:{' '}
+                  {new Date(viewingProofDeposit.createdAt).toLocaleString([], {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}
+                </div>
+              </div>
+              <a
+                href={viewingProofDeposit.proofImageUrl}
+                download={`deposit-proof-${viewingProofDeposit.id}.jpg`}
+                className="px-3.5 py-2 rounded-xl apex-glow-btn font-bold text-xs flex items-center justify-center gap-1.5 shrink-0"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download Screenshot
               </a>
             </div>
           </div>

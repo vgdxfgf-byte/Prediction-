@@ -202,7 +202,7 @@ service cloud.firestore {
 
     function isValidDeposit(data) {
       return data.keys().hasAll(['id', 'userId', 'ownerUid', 'username', 'amount', 'paymentMethod', 'referenceNumber', 'status', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'userId', 'ownerUid', 'username', 'amount', 'paymentMethod', 'referenceNumber', 'notes', 'status', 'reviewedAt', 'reviewedBy', 'adminRemark', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'ownerUid', 'username', 'amount', 'paymentMethod', 'referenceNumber', 'notes', 'status', 'reviewedAt', 'reviewedBy', 'adminRemark', 'proofImageUrl', 'createdAt', 'updatedAt']) &&
         isValidId(data.id) &&
         isValidId(data.userId) &&
         isValidId(data.ownerUid) &&
@@ -215,6 +215,7 @@ service cloud.firestore {
         isOptionalString(data, 'reviewedAt', 64) &&
         isOptionalString(data, 'reviewedBy', 64) &&
         isOptionalString(data, 'adminRemark', 400) &&
+        (!('proofImageUrl' in data) || data.proofImageUrl == null || (data.proofImageUrl is string && data.proofImageUrl.size() <= 500000 && data.proofImageUrl.matches('^data:image/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$'))) &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -429,13 +430,23 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         get(/databases/$(database)/documents/users/$(incoming().userId)).data.ownerUid == request.auth.uid &&
         get(/databases/$(database)/documents/users/$(incoming().userId)).data.status == 'active';
-      allow update: if isAdmin() && isValidId(depositId) && isValidDeposit(incoming()) &&
+      allow update: if isValidId(depositId) && isValidDeposit(incoming()) &&
         existing().status == 'pending' &&
         incoming().id == existing().id &&
         incoming().userId == existing().userId &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time;
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (isAuthenticatedAppUser() &&
+            existing().ownerUid == request.auth.uid &&
+            incoming().username == existing().username &&
+            incoming().amount == existing().amount &&
+            incoming().paymentMethod == existing().paymentMethod &&
+            incoming().referenceNumber == existing().referenceNumber &&
+            incoming().status == 'pending' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['proofImageUrl', 'updatedAt']))
+        );
       allow delete: if isAdmin() && isValidId(depositId);
     }
 

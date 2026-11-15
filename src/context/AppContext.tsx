@@ -15,6 +15,7 @@ import {
   fsPlaceBet,
   fsPlaceParlayBet,
   fsRequestDeposit,
+  fsUploadDepositProof,
   fsRequestWithdrawal,
   fsResetUserPassword,
   fsReviewDeposit,
@@ -137,7 +138,14 @@ interface AppContextType {
     choice: 'YES' | 'NO',
     amount: number
   ) => Promise<ActionResult & { betId?: string; lockedOdds?: number; lockedPayout?: number }>;
-  requestDeposit: (amount: number, paymentMethod: string, referenceNumber: string, notes?: string) => Promise<ActionResult>;
+  requestDeposit: (
+    amount: number,
+    paymentMethod: string,
+    referenceNumber: string,
+    notes?: string,
+    proofImageUrl?: string
+  ) => Promise<ActionResult>;
+  uploadDepositProof: (depositId: string, proofImageUrl: string) => Promise<ActionResult>;
   requestWithdrawal: (amount: number, payoutMethod: string, payoutDetails: string) => Promise<ActionResult>;
 
   // Admin Actions - Users
@@ -691,13 +699,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     amount: number,
     paymentMethod: string,
     referenceNumber: string,
-    notes?: string
+    notes?: string,
+    proofImageUrl?: string
   ): Promise<ActionResult> => {
     if (!fbAuthUser || !currentUser) return { success: false, error: 'Please sign in first' };
     try {
-      return await fsRequestDeposit(fbAuthUser.uid, currentUser, amount, paymentMethod, referenceNumber, notes);
+      return await fsRequestDeposit(
+        fbAuthUser.uid,
+        currentUser,
+        amount,
+        paymentMethod,
+        referenceNumber,
+        notes,
+        proofImageUrl
+      );
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to submit deposit request' };
+    }
+  };
+
+  const uploadDepositProof = async (depositId: string, proofImageUrl: string): Promise<ActionResult> => {
+    if (!fbAuthUser || !currentUser) return { success: false, error: 'Please sign in first' };
+    const targetDeposit = deposits.find(d => d.id === depositId);
+    if (!targetDeposit) return { success: false, error: 'Deposit request not found' };
+    try {
+      return await fsUploadDepositProof(targetDeposit, proofImageUrl);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to upload deposit screenshot' };
     }
   };
 
@@ -1021,6 +1049,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         placeBet,
         requestDeposit,
+        uploadDepositProof,
         requestWithdrawal,
 
         createUser,

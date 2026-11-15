@@ -34,7 +34,7 @@ export const AdminAuditLogs: React.FC = () => {
       id: d.id,
       category: 'deposit_withdraw' as const,
       title: `Deposit ${d.status === 'approved' ? 'Completed' : d.status.toUpperCase()}: +${d.amount.toLocaleString()} 🪙 for @${d.username}`,
-      details: `${d.paymentMethod} · Ref: ${d.referenceNumber}${d.adminRemark ? ` · ${d.adminRemark}` : ''}`,
+      details: `${d.paymentMethod} · Ref: ${d.referenceNumber}${d.proofImageUrl ? ' · Screenshot Attached ✓' : ''}${d.adminRemark ? ` · ${d.adminRemark}` : ''}`,
       actor: d.reviewedBy || d.username,
       timestamp: d.reviewedAt || d.createdAt,
       typeBadge: `DEPOSIT · ${d.status === 'approved' ? 'COMPLETED' : d.status.toUpperCase()}`,

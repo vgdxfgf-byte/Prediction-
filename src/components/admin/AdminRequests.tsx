@@ -613,27 +613,51 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
                             )}
                           </td>
                           <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                            {isPending ? (
-                              <div className="flex items-center justify-end gap-1.5">
+                            <div className="flex items-center justify-end gap-2">
+                              {dep.proofImageUrl && (
                                 <button
-                                  onClick={() => handleApproveDeposit(dep.id)}
-                                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow cursor-pointer"
+                                  type="button"
+                                  onClick={() =>
+                                    setLightboxImage({
+                                      url: dep.proofImageUrl!,
+                                      title: `Deposit Screenshot · @${dep.username} (${dep.amount.toLocaleString()} coins · Ref ${dep.referenceNumber})`
+                                    })
+                                  }
+                                  className="relative group rounded-lg overflow-hidden border border-emerald-500/40 w-9 h-9 shrink-0 cursor-pointer"
+                                  title="View user payment screenshot"
                                 >
-                                  <Check className="w-3.5 h-3.5" />
-                                  Approve (+{dep.amount} 🪙)
+                                  <img
+                                    src={dep.proofImageUrl}
+                                    alt="Deposit screenshot"
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <span className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                    <ZoomIn className="w-3.5 h-3.5 text-white" />
+                                  </span>
                                 </button>
-                                <button
-                                  onClick={() => setRejectItem({ type: 'deposit', id: dep.id, user: dep.username, amount: dep.amount })}
-                                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 text-xs font-semibold transition cursor-pointer"
-                                >
-                                  Reject
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-slate-500">
-                                {dep.status === 'approved' ? 'Credited ✓' : 'Rejected ✕'}
-                              </span>
-                            )}
+                              )}
+                              {isPending ? (
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleApproveDeposit(dep.id)}
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow cursor-pointer"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    Approve (+{dep.amount} 🪙)
+                                  </button>
+                                  <button
+                                    onClick={() => setRejectItem({ type: 'deposit', id: dep.id, user: dep.username, amount: dep.amount })}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 text-xs font-semibold transition cursor-pointer"
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-slate-500">
+                                  {dep.status === 'approved' ? 'Credited ✓' : 'Rejected ✕'}
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -845,27 +869,51 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
                         </td>
 
                         <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                          {isPending ? (
-                            <div className="flex items-center justify-end gap-1.5">
+                          <div className="flex items-center justify-end gap-2">
+                            {dep.proofImageUrl && (
                               <button
-                                onClick={() => handleApproveDeposit(dep.id)}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow cursor-pointer"
+                                type="button"
+                                onClick={() =>
+                                  setLightboxImage({
+                                    url: dep.proofImageUrl!,
+                                    title: `Deposit Screenshot · @${dep.username} (${dep.amount.toLocaleString()} coins · Ref ${dep.referenceNumber})`
+                                  })
+                                }
+                                className="relative group rounded-lg overflow-hidden border border-emerald-500/40 w-9 h-9 shrink-0 cursor-pointer"
+                                title="View user payment screenshot"
                               >
-                                <Check className="w-3.5 h-3.5" />
-                                Approve (+{dep.amount} 🪙)
+                                <img
+                                  src={dep.proofImageUrl}
+                                  alt="Deposit screenshot"
+                                  className="w-full h-full object-cover"
+                                />
+                                <span className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                  <ZoomIn className="w-3.5 h-3.5 text-white" />
+                                </span>
                               </button>
-                              <button
-                                onClick={() => setRejectItem({ type: 'deposit', id: dep.id, user: dep.username, amount: dep.amount })}
-                                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 text-xs font-semibold transition cursor-pointer"
-                              >
-                                Reject
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-[11px] text-slate-500">
-                              {dep.status === 'approved' ? 'Credited ✓' : 'Rejected ✕'}
-                            </span>
-                          )}
+                            )}
+                            {isPending ? (
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleApproveDeposit(dep.id)}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow cursor-pointer"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  Approve (+{dep.amount} 🪙)
+                                </button>
+                                <button
+                                  onClick={() => setRejectItem({ type: 'deposit', id: dep.id, user: dep.username, amount: dep.amount })}
+                                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 text-xs font-semibold transition cursor-pointer"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-500">
+                                {dep.status === 'approved' ? 'Credited ✓' : 'Rejected ✕'}
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );

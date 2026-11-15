@@ -220,6 +220,7 @@ function mapDepositDoc(id: string, data: Record<string, unknown>): DepositReques
     reviewedAt: data.reviewedAt ? String(data.reviewedAt) : undefined,
     reviewedBy: data.reviewedBy ? String(data.reviewedBy) : undefined,
     adminRemark: data.adminRemark ? String(data.adminRemark) : undefined,
+    proofImageUrl: data.proofImageUrl ? String(data.proofImageUrl) : undefined,
     ownerUid: data.ownerUid ? String(data.ownerUid) : undefined
   };
 }
@@ -1160,28 +1161,66 @@ export async function fsRequestDeposit(
   amount: number,
   paymentMethod: string,
   referenceNumber: string,
-  notes?: string
+  notes?: string,
+  proofImageUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
   if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: 'Amount must be greater than 0' };
   if (!referenceNumber.trim()) return { success: false, error: 'Payment reference number is required' };
+  if (
+    proofImageUrl &&
+    (proofImageUrl.length > 500000 || !VALID_PROOF_DATA_URL_RE.test(proofImageUrl))
+  ) {
+    return {
+      success: false,
+      error: 'Invalid or oversized payment screenshot. Please choose a JPG, PNG, or WebP image.'
+    };
+  }
   const depId = `dep_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+  const payload: Record<string, unknown> = {
+    id: depId,
+    userId: user.id,
+    ownerUid: authUid,
+    username: user.username,
+    amount,
+    paymentMethod: (paymentMethod.trim() || 'UPI Transfer').slice(0, 120),
+    referenceNumber: referenceNumber.trim().slice(0, 120),
+    notes: notes ? notes.trim().slice(0, 400) : '',
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+  if (proofImageUrl) {
+    payload.proofImageUrl = proofImageUrl;
+  }
   try {
-    await setDoc(doc(db, 'deposits', depId), {
-      id: depId,
-      userId: user.id,
-      ownerUid: authUid,
-      username: user.username,
-      amount,
-      paymentMethod: (paymentMethod.trim() || 'UPI Transfer').slice(0, 120),
-      referenceNumber: referenceNumber.trim().slice(0, 120),
-      notes: notes ? notes.trim().slice(0, 400) : '',
-      status: 'pending',
-      createdAt: serverTimestamp(),
+    await setDoc(doc(db, 'deposits', depId), payload);
+    return { success: true };
+  } catch (err) {
+    handleFirestoreError(err, OperationType.CREATE, `deposits/${depId}`);
+  }
+}
+
+export async function fsUploadDepositProof(
+  deposit: DepositRequest,
+  proofImageUrl: string
+): Promise<{ success: boolean; error?: string }> {
+  if (deposit.status !== 'pending') {
+    return { success: false, error: 'Screenshots can only be uploaded while the deposit is pending review.' };
+  }
+  if (!proofImageUrl || proofImageUrl.length > 500000 || !VALID_PROOF_DATA_URL_RE.test(proofImageUrl)) {
+    return {
+      success: false,
+      error: 'Invalid or oversized payment screenshot. Please upload a JPG, PNG, or WebP image.'
+    };
+  }
+  try {
+    await updateDoc(doc(db, 'deposits', deposit.id), {
+      proofImageUrl,
       updatedAt: serverTimestamp()
     });
     return { success: true };
   } catch (err) {
-    handleFirestoreError(err, OperationType.CREATE, `deposits/${depId}`);
+    handleFirestoreError(err, OperationType.UPDATE, `deposits/${deposit.id}`);
   }
 }
 
