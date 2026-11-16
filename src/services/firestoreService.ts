@@ -217,6 +217,7 @@ export const MIN_BET_LIMIT = 500;
 export const MAX_BET_LIMIT = 100000;
 export const DEFAULT_YES_ODDS = 1.8;
 export const DEFAULT_NO_ODDS = 3.2;
+export const MIN_DEPOSIT_AMOUNT = 1000;
 
 export function normalizeBetLimits(minVal: unknown, maxVal: unknown): { minBet: number; maxBet: number } {
   const rawMin = Number(minVal ?? MIN_BET_LIMIT);
@@ -2009,7 +2010,9 @@ export async function fsRequestDeposit(
   notes?: string,
   proofImageUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
-  if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: 'Amount must be greater than 0' };
+  if (!Number.isFinite(amount) || amount < MIN_DEPOSIT_AMOUNT) {
+    return { success: false, error: `Minimum deposit amount is ${MIN_DEPOSIT_AMOUNT.toLocaleString()} coins` };
+  }
   if (!referenceNumber.trim()) return { success: false, error: 'Payment reference number is required' };
   if (
     proofImageUrl &&

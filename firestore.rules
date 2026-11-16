@@ -522,6 +522,7 @@ service cloud.firestore {
       allow get: if isValidId(depositId) && (isAdmin() || (isAuthenticatedAppUser() && existing().ownerUid == request.auth.uid));
       allow list: if isAdmin() || (isAuthenticatedAppUser() && resource.data.ownerUid == request.auth.uid);
       allow create: if isAuthenticatedAppUser() && isValidId(depositId) && isValidDeposit(incoming()) &&
+        incoming().amount >= 1000 &&
         incoming().ownerUid == request.auth.uid &&
         incoming().status == 'pending' &&
         incoming().createdAt == request.time &&
