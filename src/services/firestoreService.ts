@@ -1605,6 +1605,7 @@ export function subscribeUserPortalData(
             title: String(d.title || 'Official Admin Payment Gateway'),
             instructions: String(d.instructions || ''),
             channels: Array.isArray(d.channels) ? d.channels : [],
+            qrCodeImageUrl: d.qrCodeImageUrl ? String(d.qrCodeImageUrl) : null,
             updatedAt: toIso(d.updatedAt)
           });
         }
@@ -1741,6 +1742,7 @@ export function subscribeAdminPortalData(handlers: {
             title: String(d.title || 'Official Admin Payment Gateway'),
             instructions: String(d.instructions || ''),
             channels: Array.isArray(d.channels) ? d.channels : [],
+            qrCodeImageUrl: d.qrCodeImageUrl ? String(d.qrCodeImageUrl) : null,
             updatedAt: toIso(d.updatedAt)
           });
         }
@@ -3196,6 +3198,13 @@ export async function fsUploadWithdrawalProof(
 export async function fsUpdateGlobalPaymentGateway(
   config: Omit<PaymentGatewayConfig, 'updatedAt'>
 ): Promise<{ success: boolean; error?: string }> {
+  const qr = config.qrCodeImageUrl ? String(config.qrCodeImageUrl) : null;
+  if (qr && (qr.length > 500000 || !VALID_PROOF_DATA_URL_RE.test(qr))) {
+    return {
+      success: false,
+      error: 'Invalid or oversized QR code image. Please upload a JPG, PNG, or WebP QR code.'
+    };
+  }
   try {
     await setDoc(doc(db, 'settings', 'paymentGateway'), {
       title: (config.title || 'Official Admin Payment Gateway').trim().slice(0, 120),
@@ -3206,6 +3215,7 @@ export async function fsUpdateGlobalPaymentGateway(
         value: String(c.value || '').trim(),
         enabled: c.enabled !== false
       })),
+      qrCodeImageUrl: qr,
       updatedAt: serverTimestamp()
     });
     return { success: true };
@@ -3218,6 +3228,13 @@ export async function fsUpdateUserPaymentGateway(
   userId: string,
   config: Omit<PaymentGatewayConfig, 'updatedAt'> | null
 ): Promise<{ success: boolean; error?: string }> {
+  const qr = config?.qrCodeImageUrl ? String(config.qrCodeImageUrl) : null;
+  if (qr && (qr.length > 500000 || !VALID_PROOF_DATA_URL_RE.test(qr))) {
+    return {
+      success: false,
+      error: 'Invalid or oversized QR code image. Please upload a JPG, PNG, or WebP QR code.'
+    };
+  }
   try {
     await updateDoc(doc(db, 'users', userId), {
       customPaymentGateway: config
@@ -3225,6 +3242,7 @@ export async function fsUpdateUserPaymentGateway(
             title: (config.title || 'Assigned Payment Gateway').trim().slice(0, 120),
             instructions: (config.instructions || '').trim().slice(0, 1000),
             channels: (config.channels || []).slice(0, 20),
+            qrCodeImageUrl: qr,
             updatedAt: new Date().toISOString()
           }
         : null,

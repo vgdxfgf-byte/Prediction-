@@ -1,6 +1,11 @@
 const MAX_DATA_URL_LENGTH = 460000;
 
-function renderScaledJpeg(img: HTMLImageElement, maxDim: number, quality: number): string {
+function renderScaledJpeg(
+  img: HTMLImageElement,
+  maxDim: number,
+  quality: number,
+  backgroundColor: string
+): string {
   const ratio = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
   const width = Math.max(1, Math.round(img.width * ratio));
   const height = Math.max(1, Math.round(img.height * ratio));
@@ -13,13 +18,16 @@ function renderScaledJpeg(img: HTMLImageElement, maxDim: number, quality: number
     throw new Error('Could not process image in browser');
   }
 
-  ctx.fillStyle = '#060b0e';
+  ctx.fillStyle = backgroundColor;
   ctx.fillRect(0, 0, width, height);
   ctx.drawImage(img, 0, 0, width, height);
   return canvas.toDataURL('image/jpeg', quality);
 }
 
-export async function compressChatImage(file: File): Promise<string> {
+export async function compressChatImage(
+  file: File,
+  options?: { backgroundColor?: string }
+): Promise<string> {
   if (!file.type.startsWith('image/')) {
     throw new Error('Please choose a valid image file (JPG, PNG, or WebP).');
   }
@@ -27,6 +35,7 @@ export async function compressChatImage(file: File): Promise<string> {
     throw new Error('Image is too large (max 15 MB).');
   }
 
+  const bgColor = options?.backgroundColor || '#060b0e';
   const objectUrl = URL.createObjectURL(file);
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -43,14 +52,18 @@ export async function compressChatImage(file: File): Promise<string> {
     ];
 
     for (const [maxDim, quality] of attempts) {
-      const dataUrl = renderScaledJpeg(img, maxDim, quality);
+      const dataUrl = renderScaledJpeg(img, maxDim, quality, bgColor);
       if (dataUrl.length <= MAX_DATA_URL_LENGTH) {
         return dataUrl;
       }
     }
 
-    throw new Error('Image is still too detailed after compression. Please pick a smaller screenshot.');
+    throw new Error('Image is still too detailed after compression. Please pick a smaller image.');
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+export async function compressQrImage(file: File): Promise<string> {
+  return compressChatImage(file, { backgroundColor: '#ffffff' });
 }

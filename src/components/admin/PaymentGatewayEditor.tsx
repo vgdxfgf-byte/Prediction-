@@ -12,8 +12,11 @@ import {
   EyeOff,
   Smartphone,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  QrCode,
+  Upload
 } from 'lucide-react';
+import { compressQrImage } from '../../utils/imageCompression';
 
 interface PaymentGatewayEditorProps {
   initialConfig: PaymentGatewayConfig;
@@ -38,12 +41,15 @@ export const PaymentGatewayEditor: React.FC<PaymentGatewayEditorProps> = ({
   const [title, setTitle] = useState(initialConfig.title);
   const [instructions, setInstructions] = useState(initialConfig.instructions || '');
   const [channels, setChannels] = useState<PaymentGatewayChannel[]>(initialConfig.channels);
+  const [qrCodeImageUrl, setQrCodeImageUrl] = useState<string | null>(initialConfig.qrCodeImageUrl || null);
+  const [qrProcessing, setQrProcessing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const prevTargetRef = useRef(targetLabel);
   const isDirtyRef = useRef(false);
+  const qrFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const targetChanged = prevTargetRef.current !== targetLabel;
@@ -60,6 +66,7 @@ export const PaymentGatewayEditor: React.FC<PaymentGatewayEditorProps> = ({
     setTitle(initialConfig.title);
     setInstructions(initialConfig.instructions || '');
     setChannels(initialConfig.channels.map(c => ({ ...c })));
+    setQrCodeImageUrl(initialConfig.qrCodeImageUrl || null);
   }, [initialConfig, targetLabel]);
 
   const markDirty = () => {
@@ -122,6 +129,23 @@ export const PaymentGatewayEditor: React.FC<PaymentGatewayEditorProps> = ({
     setErrorMsg('');
   };
 
+  const handleQrFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setErrorMsg('');
+    setQrProcessing(true);
+    try {
+      const compressed = await compressQrImage(file);
+      markDirty();
+      setQrCodeImageUrl(compressed);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Unable to process QR code image');
+    } finally {
+      setQrProcessing(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -133,8 +157,13 @@ export const PaymentGatewayEditor: React.FC<PaymentGatewayEditorProps> = ({
       return;
     }
 
-    if (channels.length === 0) {
-      setErrorMsg('At least one payment channel or UPI ID is required.');
+    if (channels.length === 0 && !qrCodeImageUrl) {
+      setErrorMsg('Please provide at least one payment channel/UPI ID or upload a QR code.');
+      return;
+    }
+
+    if (qrProcessing) {
+      setErrorMsg('Please wait for the QR code image to finish processing.');
       return;
     }
 
@@ -146,14 +175,15 @@ export const PaymentGatewayEditor: React.FC<PaymentGatewayEditorProps> = ({
         ...c,
         label: c.label.trim(),
         value: c.value.trim()
-      }))
+      })),
+      qrCodeImageUrl: qrCodeImageUrl || null
     });
     setSaving(false);
 
     if (res.success) {
       isDirtyRef.current = false;
       setIsDirty(false);
-      setSuccessMsg(`Payment Gateway & UPI IDs updated for ${targetLabel}.`);
+      setSuccessMsg(`Payment Gateway, QR Code & UPI IDs updated for ${targetLabel}.`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } else {
       setErrorMsg(res.error || 'Failed to save payment gateway settings');
@@ -238,6 +268,88 @@ export const PaymentGatewayEditor: React.FC<PaymentGatewayEditorProps> = ({
             className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-white outline-none"
           />
         </div>
+      </div>
+
+      {/* Deposit Payment QR Code Upload */}
+      <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <QrCode className="w-4 h-4 text-emerald-400" />
+            <div>
+              <div className="text-slate-200 font-semibold">Deposit QR Code (Optional)</div>
+              <div className="text-[10px] text-slate-500">
+                Upload a PhonePe, GPay, Paytm, or UPI QR code image for users to scan and pay.
+              </div>
+            </div>
+          </div>
+          {qrCodeImageUrl && (
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
+              QR Active
+            </span>
+          )}
+        </div>
+
+        <input
+          ref={qrFileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleQrFileChange}
+          className="hidden"
+        />
+
+        {qrCodeImageUrl ? (
+          <div className="flex flex-col sm:flex-row items-center gap-3 p-3 rounded-xl bg-slate-900 border border-slate-800">
+            <div className="bg-white p-2 rounded-xl shrink-0 shadow">
+              <img
+                src={qrCodeImageUrl}
+                alt="Deposit Payment QR Code"
+                className="w-28 h-28 object-contain"
+              />
+            </div>
+            <div className="flex-1 space-y-2 text-center sm:text-left">
+              <div className="text-[11px] text-slate-300 font-semibold">
+                QR code ready for users in Deposit Coins
+              </div>
+              <div className="text-[10px] text-slate-400">
+                Click Save Payment Gateway below after uploading or changing your QR code.
+              </div>
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={qrProcessing}
+                  onClick={() => qrFileInputRef.current?.click()}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-[11px] flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                  {qrProcessing ? 'Processing...' : 'Replace QR'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    markDirty();
+                    setQrCodeImageUrl(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-semibold text-[11px] flex items-center gap-1 transition cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Remove QR
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={qrProcessing}
+            onClick={() => qrFileInputRef.current?.click()}
+            className="w-full py-3.5 px-4 rounded-xl border-2 border-dashed border-slate-700 hover:border-emerald-500/60 bg-slate-900/60 hover:bg-slate-900 text-slate-300 flex items-center justify-center gap-2 transition cursor-pointer"
+          >
+            <Upload className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="font-semibold">
+              {qrProcessing ? 'Processing QR code...' : 'Upload Payment QR Code Image (JPG, PNG, WebP)'}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Channels List */}
@@ -375,15 +487,26 @@ export const PaymentGatewayEditor: React.FC<PaymentGatewayEditorProps> = ({
       </div>
 
       {/* Live Preview of User Deposit Screen */}
-      <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 space-y-2">
+      <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 space-y-2.5">
         <div className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
           Live Preview (What User Sees in Deposit Coins)
         </div>
-        {activePreviewChannels.length === 0 ? (
-          <div className="text-[11px] text-amber-400">
-            No active channels right now. Enable at least one UPI ID or channel so users can deposit.
+        {qrCodeImageUrl && (
+          <div className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-900 border border-emerald-500/25">
+            <div className="bg-white p-1.5 rounded-lg shrink-0">
+              <img src={qrCodeImageUrl} alt="QR Preview" className="w-16 h-16 object-contain" />
+            </div>
+            <div className="text-[11px] text-slate-300">
+              <div className="font-bold text-emerald-400">Scan &amp; Pay QR Code</div>
+              <div className="text-[10px] text-slate-400">Shown prominently in user Deposit modal with zoom &amp; download.</div>
+            </div>
           </div>
-        ) : (
+        )}
+        {activePreviewChannels.length === 0 && !qrCodeImageUrl ? (
+          <div className="text-[11px] text-amber-400">
+            No active channels or QR code right now. Enable at least one UPI ID/channel or upload a QR code so users can deposit.
+          </div>
+        ) : activePreviewChannels.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {activePreviewChannels.map(ch => (
               <div key={ch.id} className="bg-slate-900 px-3 py-2 rounded-lg border border-slate-800 flex items-center justify-between gap-2">
@@ -397,7 +520,7 @@ export const PaymentGatewayEditor: React.FC<PaymentGatewayEditorProps> = ({
               </div>
             ))}
           </div>
-        )}
+        ) : null}
       </div>
 
       {errorMsg && (

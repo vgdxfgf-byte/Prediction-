@@ -24,7 +24,8 @@ import {
   ImagePlus,
   ZoomIn,
   Download,
-  X
+  X,
+  QrCode
 } from 'lucide-react';
 
 interface WalletViewProps {
@@ -101,6 +102,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [viewingProofWithdrawal, setViewingProofWithdrawal] = useState<WithdrawalRequest | null>(null);
   const [viewingProofDeposit, setViewingProofDeposit] = useState<DepositRequest | null>(null);
+  const [viewingGatewayQr, setViewingGatewayQr] = useState<boolean>(false);
 
   if (!currentUser) return null;
 
@@ -982,7 +984,46 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     </p>
                   )}
 
-                  {enabledGatewayChannels.length === 0 ? (
+                  {effectiveGateway.qrCodeImageUrl && (
+                    <div className="p-3 rounded-xl bg-slate-900 border border-emerald-500/30 flex flex-col items-center gap-2.5 text-center">
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 uppercase tracking-wider">
+                        <QrCode className="w-3.5 h-3.5" />
+                        <span>Scan &amp; Pay via QR Code</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setViewingGatewayQr(true)}
+                        className="bg-white p-2.5 rounded-xl shadow-lg hover:scale-[1.02] transition cursor-pointer"
+                        title="Click to enlarge QR code"
+                      >
+                        <img
+                          src={effectiveGateway.qrCodeImageUrl}
+                          alt="Payment QR Code"
+                          className="w-40 h-40 object-contain"
+                        />
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setViewingGatewayQr(true)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                        >
+                          <ZoomIn className="w-3 h-3" />
+                          Enlarge QR
+                        </button>
+                        <a
+                          href={effectiveGateway.qrCodeImageUrl}
+                          download="payment-qr-code.jpg"
+                          className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[10px] font-semibold flex items-center gap-1"
+                        >
+                          <Download className="w-3 h-3" />
+                          Download QR
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  {enabledGatewayChannels.length === 0 && !effectiveGateway.qrCodeImageUrl ? (
                     <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 text-[11px]">
                       No active payment gateway channels configured. Please contact the administrator.
                     </div>
@@ -1062,6 +1103,9 @@ export const WalletView: React.FC<WalletViewProps> = ({
                     onChange={e => setDepMethod(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none"
                   >
+                    {effectiveGateway.qrCodeImageUrl && (
+                      <option value="UPI QR Code Scan">UPI QR Code Scan</option>
+                    )}
                     {enabledGatewayChannels.map(ch => (
                       <option key={ch.id} value={ch.label}>
                         {ch.label} ({ch.value})
@@ -1453,6 +1497,66 @@ export const WalletView: React.FC<WalletViewProps> = ({
               >
                 <Download className="w-3.5 h-3.5" />
                 Download Screenshot
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PAYMENT GATEWAY QR CODE LIGHTBOX MODAL */}
+      {viewingGatewayQr && effectiveGateway.qrCodeImageUrl && (
+        <div
+          onClick={() => setViewingGatewayQr(false)}
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-fade-in"
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-md bg-[#0a1116] border border-[#14e071]/35 rounded-2xl overflow-hidden shadow-2xl text-xs"
+          >
+            <div className="px-4 py-3 border-b border-white/[0.08] bg-[#070c10] flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-bold text-sm text-white flex items-center gap-2">
+                  <QrCode className="w-4 h-4 text-[#14e071] shrink-0" />
+                  <span className="truncate">Deposit Payment QR Code</span>
+                </div>
+                <div className="text-[11px] text-slate-400 truncate">
+                  Scan with any UPI / payment app, then upload your payment proof
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingGatewayQr(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.08] cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 bg-slate-950 flex items-center justify-center">
+              <div className="bg-white p-4 rounded-2xl shadow-xl border border-white/20">
+                <img
+                  src={effectiveGateway.qrCodeImageUrl}
+                  alt="Deposit Payment QR Code"
+                  className="max-h-[56vh] w-auto max-w-full object-contain rounded-lg"
+                />
+              </div>
+            </div>
+
+            <div className="px-4 py-3 border-t border-white/[0.08] bg-[#070c10] flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setViewingGatewayQr(false)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-slate-300 font-semibold text-xs cursor-pointer"
+              >
+                Close
+              </button>
+              <a
+                href={effectiveGateway.qrCodeImageUrl}
+                download="deposit-payment-qr.jpg"
+                className="px-4 py-2 rounded-xl apex-glow-btn font-bold text-xs flex items-center justify-center gap-1.5 shrink-0"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download QR
               </a>
             </div>
           </div>

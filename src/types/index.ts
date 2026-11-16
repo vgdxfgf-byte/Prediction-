@@ -12,6 +12,7 @@ export interface PaymentGatewayConfig {
   title: string;
   instructions?: string;
   channels: PaymentGatewayChannel[];
+  qrCodeImageUrl?: string | null;
   updatedAt: string;
 }
 

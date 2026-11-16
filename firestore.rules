@@ -66,10 +66,11 @@ service cloud.firestore {
 
     function isValidSetting(data) {
       return data.keys().hasAll(['updatedAt']) &&
-        data.keys().hasOnly(['title', 'instructions', 'channels', 'enabled', 'phoneNumber', 'buttonLabel', 'defaultMessage', 'updatedAt']) &&
+        data.keys().hasOnly(['title', 'instructions', 'channels', 'qrCodeImageUrl', 'enabled', 'phoneNumber', 'buttonLabel', 'defaultMessage', 'updatedAt']) &&
         isOptionalString(data, 'title', 120) &&
         isOptionalString(data, 'instructions', 1000) &&
         (!('channels' in data) || (data.channels is list && data.channels.size() <= 20 && (data.channels.size() == 0 || data.channels[0] is map))) &&
+        (!('qrCodeImageUrl' in data) || data.qrCodeImageUrl == null || (data.qrCodeImageUrl is string && data.qrCodeImageUrl.size() <= 500000 && data.qrCodeImageUrl.matches('^data:image/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$'))) &&
         (!('enabled' in data) || data.enabled is bool) &&
         isOptionalString(data, 'phoneNumber', 40) &&
         isOptionalString(data, 'buttonLabel', 60) &&

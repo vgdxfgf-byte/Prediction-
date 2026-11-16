@@ -172,7 +172,10 @@ function sanitizeUser(u: User): User {
 function getEffectiveGateway(db: StaticDatabaseState, userId?: string): PaymentGatewayConfig {
   if (userId) {
     const user = db.users.find(u => u.id === userId);
-    if (user?.customPaymentGateway && user.customPaymentGateway.channels.length > 0) {
+    if (
+      user?.customPaymentGateway &&
+      (user.customPaymentGateway.channels.length > 0 || Boolean(user.customPaymentGateway.qrCodeImageUrl))
+    ) {
       return user.customPaymentGateway;
     }
   }

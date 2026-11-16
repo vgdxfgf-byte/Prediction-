@@ -1511,7 +1511,10 @@ export const AdminUserManagement: React.FC<AdminUserManagementProps> = ({
               {(() => {
                 const liveUser = users.find(u => u.id === gatewayManageUser.id) || gatewayManageUser;
                 const effective = getEffectivePaymentGateway(liveUser.id);
-                const hasCustom = Boolean(liveUser.customPaymentGateway && liveUser.customPaymentGateway.channels.length > 0);
+                const hasCustom = Boolean(
+                  liveUser.customPaymentGateway &&
+                  (liveUser.customPaymentGateway.channels.length > 0 || Boolean(liveUser.customPaymentGateway.qrCodeImageUrl))
+                );
 
                 return (
                   <PaymentGatewayEditor

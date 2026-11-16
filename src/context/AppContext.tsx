@@ -78,6 +78,7 @@ const DEFAULT_PAYMENT_GATEWAY: PaymentGatewayConfig = {
   title: 'Official Admin Payment Gateway',
   instructions: '',
   channels: [],
+  qrCodeImageUrl: null,
   updatedAt: ''
 };
 
@@ -1130,14 +1131,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const getEffectivePaymentGateway = (userId?: string): PaymentGatewayConfig => {
     if (activePortal === 'user' && currentUser && (!userId || userId === currentUser.id)) {
-      if (currentUser.customPaymentGateway && currentUser.customPaymentGateway.channels.length > 0) {
+      if (
+        currentUser.customPaymentGateway &&
+        (currentUser.customPaymentGateway.channels.length > 0 || Boolean(currentUser.customPaymentGateway.qrCodeImageUrl))
+      ) {
         return currentUser.customPaymentGateway;
       }
       return paymentGateway;
     }
     if (userId) {
       const user = users.find(u => u.id === userId);
-      if (user?.customPaymentGateway && user.customPaymentGateway.channels.length > 0) {
+      if (
+        user?.customPaymentGateway &&
+        (user.customPaymentGateway.channels.length > 0 || Boolean(user.customPaymentGateway.qrCodeImageUrl))
+      ) {
         return user.customPaymentGateway;
       }
     }

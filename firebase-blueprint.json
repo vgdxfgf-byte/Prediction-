@@ -64,6 +64,7 @@
         "title": { "type": "string", "maxLength": 120 },
         "instructions": { "type": "string", "maxLength": 1000 },
         "channels": { "type": "array" },
+        "qrCodeImageUrl": { "type": "string", "maxLength": 500000 },
         "enabled": { "type": "boolean" },
         "phoneNumber": { "type": "string", "maxLength": 40 },
         "buttonLabel": { "type": "string", "maxLength": 60 },

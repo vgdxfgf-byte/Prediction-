@@ -1118,7 +1118,10 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
 
               <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
                 {regularUsers.map(u => {
-                  const hasCustom = Boolean(u.customPaymentGateway && u.customPaymentGateway.channels.length > 0);
+                  const hasCustom = Boolean(
+                    u.customPaymentGateway &&
+                    (u.customPaymentGateway.channels.length > 0 || Boolean(u.customPaymentGateway.qrCodeImageUrl))
+                  );
                   return (
                     <button
                       key={u.id}
@@ -1160,7 +1163,10 @@ export const AdminRequests: React.FC<AdminRequestsProps> = ({
               const targetUser = regularUsers.find(u => u.id === gatewayTarget);
               if (!targetUser) return null;
               const effective = getEffectivePaymentGateway(targetUser.id);
-              const hasCustom = Boolean(targetUser.customPaymentGateway && targetUser.customPaymentGateway.channels.length > 0);
+              const hasCustom = Boolean(
+                targetUser.customPaymentGateway &&
+                (targetUser.customPaymentGateway.channels.length > 0 || Boolean(targetUser.customPaymentGateway.qrCodeImageUrl))
+              );
 
               return (
                 <PaymentGatewayEditor
