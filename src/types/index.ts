@@ -50,8 +50,8 @@ export interface Prediction {
   title: string;
   subtitle: string; // e.g. "India vs Australia - 2nd Test"
   category: PredictionCategory;
-  yesOdds: number; // e.g. 1.85 (pays 1.85x)
-  noOdds: number; // e.g. 2.10 (pays 2.10x)
+  yesOdds: number; // e.g. 1.8 (pays 1.80x)
+  noOdds: number; // e.g. 3.2 (pays 3.20x)
   minBet: number;
   maxBet: number;
   closingTime: string; // ISO string

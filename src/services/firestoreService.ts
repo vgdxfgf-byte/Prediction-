@@ -215,6 +215,8 @@ function mapUserDoc(id: string, data: Record<string, unknown>): User {
 
 export const MIN_BET_LIMIT = 500;
 export const MAX_BET_LIMIT = 100000;
+export const DEFAULT_YES_ODDS = 1.8;
+export const DEFAULT_NO_ODDS = 3.2;
 
 export function normalizeBetLimits(minVal: unknown, maxVal: unknown): { minBet: number; maxBet: number } {
   const rawMin = Number(minVal ?? MIN_BET_LIMIT);
@@ -234,8 +236,8 @@ function mapPredictionDoc(id: string, data: Record<string, unknown>): Prediction
     title: String(data.title || ''),
     subtitle: String(data.subtitle || ''),
     category: data.category as Prediction['category'],
-    yesOdds: Number(data.yesOdds ?? 1.9),
-    noOdds: Number(data.noOdds ?? 1.9),
+    yesOdds: Number(data.yesOdds ?? DEFAULT_YES_ODDS),
+    noOdds: Number(data.noOdds ?? DEFAULT_NO_ODDS),
     minBet,
     maxBet,
     closingTime: String(data.closingTime || new Date().toISOString()),
@@ -513,8 +515,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       title: "Will India win today's cricket match against Australia?",
       subtitle: 'Border-Gavaskar Trophy · Match 2, Melbourne',
       category: 'Cricket',
-      yesOdds: 1.85,
-      noOdds: 2.15,
+      yesOdds: DEFAULT_YES_ODDS,
+      noOdds: DEFAULT_NO_ODDS,
       minBet: MIN_BET_LIMIT,
       maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 24 * 3600 * 1000).toISOString(),
@@ -535,8 +537,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       title: "Will Real Madrid win today's UEFA Champions League clash?",
       subtitle: 'UEFA Champions League · Real Madrid vs Bayern Munich',
       category: 'Football',
-      yesOdds: 2.1,
-      noOdds: 1.78,
+      yesOdds: DEFAULT_YES_ODDS,
+      noOdds: DEFAULT_NO_ODDS,
       minBet: MIN_BET_LIMIT,
       maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 36 * 3600 * 1000).toISOString(),
@@ -574,8 +576,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       title: 'Will the Mumbai vs Chennai T20 clash cross 360+ total match runs?',
       subtitle: 'T20 Premier League · Wankhede Stadium',
       category: 'Cricket',
-      yesOdds: 1.92,
-      noOdds: 1.88,
+      yesOdds: DEFAULT_YES_ODDS,
+      noOdds: DEFAULT_NO_ODDS,
       minBet: MIN_BET_LIMIT,
       maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 18 * 3600 * 1000).toISOString(),
@@ -595,8 +597,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       title: "Will this week's Pan-India blockbuster cross ₹100 Cr Nett in 3 days?",
       subtitle: 'Opening Weekend Box Office · India Theatrical',
       category: 'Movies',
-      yesOdds: 1.78,
-      noOdds: 2.2,
+      yesOdds: DEFAULT_YES_ODDS,
+      noOdds: DEFAULT_NO_ODDS,
       minBet: MIN_BET_LIMIT,
       maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 48 * 3600 * 1000).toISOString(),
@@ -616,8 +618,8 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
       title: "Will Friday's big cinema sequel hold an 8.0+ IMDb score after 48 hours?",
       subtitle: 'Cinema & Audience Verdict · Multiplex Release',
       category: 'Movies',
-      yesOdds: 2.05,
-      noOdds: 1.82,
+      yesOdds: DEFAULT_YES_ODDS,
+      noOdds: DEFAULT_NO_ODDS,
       minBet: MIN_BET_LIMIT,
       maxBet: MAX_BET_LIMIT,
       closingTime: new Date(now + 42 * 3600 * 1000).toISOString(),
@@ -640,21 +642,46 @@ export async function seedInitialFirestoreIfNeeded(): Promise<void> {
   }
 
   // Upgrade any existing Firestore prediction documents with legacy limits to 500–100,000
+  // and update untouched initial seed markets to default YES 1.80 / NO 3.20
   try {
+    const legacySeedOdds: Record<string, { yes: number; no: number }> = {
+      pred_1: { yes: 1.85, no: 2.15 },
+      pred_2: { yes: 2.1, no: 1.78 },
+      pred_cricket_2: { yes: 1.92, no: 1.88 },
+      pred_movie_1: { yes: 1.78, no: 2.2 },
+      pred_movie_2: { yes: 2.05, no: 1.82 }
+    };
     const allPredsSnap = await getDocs(collection(db, 'predictions'));
     const toUpgrade = allPredsSnap.docs.filter(d => {
       const data = d.data();
       const rawMin = Number(data.minBet ?? 0);
       const rawMax = Number(data.maxBet ?? 0);
-      return rawMin < MIN_BET_LIMIT || rawMax <= 10000 || rawMax > MAX_BET_LIMIT;
+      const needsLimitUpgrade = rawMin < MIN_BET_LIMIT || rawMax <= 10000 || rawMax > MAX_BET_LIMIT;
+      const legacyPair = legacySeedOdds[d.id];
+      const needsSeedOddsUpgrade =
+        Boolean(legacyPair) &&
+        data.status !== 'settled' &&
+        Number(data.yesOdds) === legacyPair.yes &&
+        Number(data.noOdds) === legacyPair.no;
+      return needsLimitUpgrade || needsSeedOddsUpgrade;
     });
     for (let i = 0; i < toUpgrade.length; i += 400) {
       const upgradeBatch = writeBatch(db);
       const chunk = toUpgrade.slice(i, i + 400);
       chunk.forEach(d => {
+        const data = d.data();
+        const legacyPair = legacySeedOdds[d.id];
+        const needsSeedOddsUpgrade =
+          Boolean(legacyPair) &&
+          data.status !== 'settled' &&
+          Number(data.yesOdds) === legacyPair.yes &&
+          Number(data.noOdds) === legacyPair.no;
         upgradeBatch.update(d.ref, {
           minBet: MIN_BET_LIMIT,
           maxBet: MAX_BET_LIMIT,
+          ...(needsSeedOddsUpgrade
+            ? { yesOdds: DEFAULT_YES_ODDS, noOdds: DEFAULT_NO_ODDS }
+            : {}),
           updatedAt: serverTimestamp()
         });
       });

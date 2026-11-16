@@ -33,6 +33,7 @@ import {
   buildLiveCricketSessionAnalysis,
   type CricketMarketSuggestion
 } from '../../utils/cricketSessionOdds';
+import { DEFAULT_YES_ODDS, DEFAULT_NO_ODDS } from '../../services/firestoreService';
 
 interface AdminPredictionsProps {
   initialCreateOpen?: boolean;
@@ -91,8 +92,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
   const [title, setTitle] = useState('');
   const [subtitle, setSubtitle] = useState('');
   const [category, setCategory] = useState<PredictionCategory>('Cricket');
-  const [yesOdds, setYesOdds] = useState<number>(1.85);
-  const [noOdds, setNoOdds] = useState<number>(2.10);
+  const [yesOdds, setYesOdds] = useState<number>(DEFAULT_YES_ODDS);
+  const [noOdds, setNoOdds] = useState<number>(DEFAULT_NO_ODDS);
   const [minBet, setMinBet] = useState<number>(500);
   const [maxBet, setMaxBet] = useState<number>(100000);
   const [closingTime, setClosingTime] = useState<string>(
@@ -102,6 +103,13 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
   const [cricketMatchId, setCricketMatchId] = useState<string>('');
   const [cricketLeagueId, setCricketLeagueId] = useState<string>('');
   const [formError, setFormError] = useState('');
+
+  // Inline Quick Odds Edit State
+  const [inlineOddsId, setInlineOddsId] = useState<string | null>(null);
+  const [inlineYesOdds, setInlineYesOdds] = useState<number>(DEFAULT_YES_ODDS);
+  const [inlineNoOdds, setInlineNoOdds] = useState<number>(DEFAULT_NO_ODDS);
+  const [savingInlineOdds, setSavingInlineOdds] = useState(false);
+  const [applyingDefaultAll, setApplyingDefaultAll] = useState(false);
 
   // Settlement Form State
   const [settleOutcome, setSettleOutcome] = useState<'YES' | 'NO' | 'VOID'>('YES');
@@ -160,8 +168,8 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setTitle('');
     setSubtitle('');
     setCategory('Cricket');
-    setYesOdds(1.85);
-    setNoOdds(2.10);
+    setYesOdds(DEFAULT_YES_ODDS);
+    setNoOdds(DEFAULT_NO_ODDS);
     setMinBet(500);
     setMaxBet(100000);
     setClosingTime(toLocalDatetimeInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
@@ -195,8 +203,6 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       if (firstSuggestion) {
         setTitle(firstSuggestion.title);
         setSubtitle(firstSuggestion.subtitle);
-        setYesOdds(firstSuggestion.yesOdds);
-        setNoOdds(firstSuggestion.noOdds);
         setClosingTime(
           toLocalDatetimeInputValue(
             new Date(Date.now() + firstSuggestion.closingMinutesFromNow * 60 * 1000)
@@ -213,28 +219,32 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setCategory('Cricket');
     setTitle(s.title);
     setSubtitle(s.subtitle);
-    setYesOdds(s.yesOdds);
-    setNoOdds(s.noOdds);
     setClosingTime(
       toLocalDatetimeInputValue(new Date(Date.now() + s.closingMinutesFromNow * 60 * 1000))
     );
     setDescription(s.description);
     setFormError('');
-    setCreateNotice(`Loaded "${s.label}" (${s.yesOdds.toFixed(2)}x / ${s.noOdds.toFixed(2)}x) into form below.`);
+    setCreateNotice(
+      `Loaded "${s.label}" with YES ${Number(yesOdds || DEFAULT_YES_ODDS).toFixed(2)}x / NO ${Number(noOdds || DEFAULT_NO_ODDS).toFixed(2)}x (editable below).`
+    );
   };
 
   const handleQuickPublishSuggestion = async (s: CricketMarketSuggestion) => {
     if (!selectedLiveMatch) return;
     setFormError('');
     setCreateNotice(null);
+
+    const activeYes = Number(yesOdds) > 1 ? Number(yesOdds) : DEFAULT_YES_ODDS;
+    const activeNo = Number(noOdds) > 1 ? Number(noOdds) : DEFAULT_NO_ODDS;
+
     setQuickPublishingId(s.id);
     const closingIso = new Date(Date.now() + s.closingMinutesFromNow * 60 * 1000).toISOString();
     const res = await createPrediction({
       title: s.title,
       subtitle: s.subtitle,
       category: 'Cricket',
-      yesOdds: s.yesOdds,
-      noOdds: s.noOdds,
+      yesOdds: activeYes,
+      noOdds: activeNo,
       minBet: Number(minBet) >= 500 && Number(minBet) < 100000 ? Number(minBet) : 500,
       maxBet: Number(maxBet) > Number(minBet) && Number(maxBet) <= 100000 ? Number(maxBet) : 100000,
       closingTime: closingIso,
@@ -245,10 +255,65 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     });
     setQuickPublishingId(null);
     if (res.success) {
-      setCreateNotice(`Published "${s.label}" live for users (${s.yesOdds.toFixed(2)}x YES / ${s.noOdds.toFixed(2)}x NO).`);
+      setCreateNotice(
+        `Published "${s.label}" live for users (${activeYes.toFixed(2)}x YES / ${activeNo.toFixed(2)}x NO).`
+      );
     } else {
       setFormError(res.error || 'Failed to publish live prediction');
     }
+  };
+
+  const handleSaveInlineOdds = async (pred: Prediction) => {
+    if (inlineYesOdds <= 1 || inlineNoOdds <= 1 || inlineYesOdds > 50 || inlineNoOdds > 50) {
+      setDeleteNotice('Odds must be between 1.01 and 50.00');
+      setTimeout(() => setDeleteNotice(null), 4000);
+      return;
+    }
+    setSavingInlineOdds(true);
+    const res = await updatePrediction(pred.id, {
+      yesOdds: Number(inlineYesOdds.toFixed(2)),
+      noOdds: Number(inlineNoOdds.toFixed(2))
+    });
+    setSavingInlineOdds(false);
+    if (res.success) {
+      setInlineOddsId(null);
+      setDeleteNotice(
+        `Updated odds for "${pred.title.slice(0, 36)}..." to YES ${Number(inlineYesOdds).toFixed(2)}x / NO ${Number(inlineNoOdds).toFixed(2)}x.`
+      );
+      setTimeout(() => setDeleteNotice(null), 4000);
+    } else {
+      setDeleteNotice(res.error || 'Failed to update odds');
+      setTimeout(() => setDeleteNotice(null), 4000);
+    }
+  };
+
+  const unsettledCustomOddsCount = predictions.filter(
+    p =>
+      p.status !== 'settled' &&
+      (Number(p.yesOdds) !== DEFAULT_YES_ODDS || Number(p.noOdds) !== DEFAULT_NO_ODDS)
+  ).length;
+
+  const handleApplyDefaultOddsToAllUnsettled = async () => {
+    const targets = predictions.filter(
+      p =>
+        p.status !== 'settled' &&
+        (Number(p.yesOdds) !== DEFAULT_YES_ODDS || Number(p.noOdds) !== DEFAULT_NO_ODDS)
+    );
+    if (targets.length === 0) return;
+    setApplyingDefaultAll(true);
+    let updated = 0;
+    for (const p of targets) {
+      const res = await updatePrediction(p.id, {
+        yesOdds: DEFAULT_YES_ODDS,
+        noOdds: DEFAULT_NO_ODDS
+      });
+      if (res.success) updated += 1;
+    }
+    setApplyingDefaultAll(false);
+    setDeleteNotice(
+      `Applied fixed default odds (YES ${DEFAULT_YES_ODDS.toFixed(2)}x / NO ${DEFAULT_NO_ODDS.toFixed(2)}x) to ${updated} active market(s).`
+    );
+    setTimeout(() => setDeleteNotice(null), 5000);
   };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
@@ -476,20 +541,34 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
           />
         </div>
 
-        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
-          {(['all', 'open', 'paused', 'closed', 'settled'] as const).map(st => (
+        <div className="flex flex-wrap items-center gap-2">
+          {unsettledCustomOddsCount > 0 && (
             <button
-              key={st}
-              onClick={() => setStatusFilter(st)}
-              className={`px-3 py-1 rounded-lg capitalize transition ${
-                statusFilter === st
-                  ? 'bg-slate-800 text-amber-400 font-bold'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              type="button"
+              disabled={applyingDefaultAll}
+              onClick={() => void handleApplyDefaultOddsToAllUnsettled()}
+              className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 disabled:opacity-60 border border-emerald-500/35 text-emerald-300 font-bold text-[11px] whitespace-nowrap transition cursor-pointer"
             >
-              {st}
+              {applyingDefaultAll
+                ? 'Updating Odds...'
+                : `Set ${unsettledCustomOddsCount} Market(s) to 1.80 / 3.20`}
             </button>
-          ))}
+          )}
+          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
+            {(['all', 'open', 'paused', 'closed', 'settled'] as const).map(st => (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                className={`px-3 py-1 rounded-lg capitalize transition ${
+                  statusFilter === st
+                    ? 'bg-slate-800 text-amber-400 font-bold'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {st}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -550,14 +629,69 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                       </td>
 
                       <td className="px-4 py-3.5 whitespace-nowrap font-mono">
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold text-[11px]">
-                            Y: {pred.yesOdds.toFixed(2)}x
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 font-bold text-[11px]">
-                            N: {pred.noOdds.toFixed(2)}x
-                          </span>
-                        </div>
+                        {inlineOddsId === pred.id && !isSettled ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="1.01"
+                              max="50"
+                              aria-label="YES Odds"
+                              value={inlineYesOdds}
+                              onChange={e => setInlineYesOdds(Number(e.target.value))}
+                              className="w-16 px-1.5 py-1 rounded bg-slate-950 border border-emerald-500/60 text-emerald-300 font-bold text-[11px] outline-none"
+                            />
+                            <span className="text-slate-500">/</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="1.01"
+                              max="50"
+                              aria-label="NO Odds"
+                              value={inlineNoOdds}
+                              onChange={e => setInlineNoOdds(Number(e.target.value))}
+                              className="w-16 px-1.5 py-1 rounded bg-slate-950 border border-rose-500/60 text-rose-300 font-bold text-[11px] outline-none"
+                            />
+                            <button
+                              type="button"
+                              disabled={savingInlineOdds}
+                              onClick={() => void handleSaveInlineOdds(pred)}
+                              className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-bold text-[10px] cursor-pointer"
+                            >
+                              {savingInlineOdds ? '...' : 'Save'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setInlineOddsId(null)}
+                              className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-sans text-[10px] cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold text-[11px]">
+                              Y: {pred.yesOdds.toFixed(2)}x
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 font-bold text-[11px]">
+                              N: {pred.noOdds.toFixed(2)}x
+                            </span>
+                            {!isSettled && (
+                              <button
+                                type="button"
+                                title="Quick Edit YES / NO Odds"
+                                onClick={() => {
+                                  setInlineOddsId(pred.id);
+                                  setInlineYesOdds(pred.yesOdds);
+                                  setInlineNoOdds(pred.noOdds);
+                                }}
+                                className="p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-amber-400 transition cursor-pointer"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       <td className="px-4 py-3.5 whitespace-nowrap font-mono text-slate-400">
@@ -878,7 +1012,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                             </span>
                             {mw && (
                               <span className="font-mono text-emerald-300 font-bold shrink-0">
-                                {mw.yesOdds.toFixed(2)}x / {mw.noOdds.toFixed(2)}x
+                                {Number(yesOdds || DEFAULT_YES_ODDS).toFixed(2)}x / {Number(noOdds || DEFAULT_NO_ODDS).toFixed(2)}x
                               </span>
                             )}
                           </div>
@@ -957,10 +1091,10 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                           <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
                             <div className="flex items-center gap-1.5 font-mono text-[11px]">
                               <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold">
-                                YES {s.yesOdds.toFixed(2)}x
+                                YES {Number(yesOdds || DEFAULT_YES_ODDS).toFixed(2)}x
                               </span>
                               <span className="px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 font-bold">
-                                NO {s.noOdds.toFixed(2)}x
+                                NO {Number(noOdds || DEFAULT_NO_ODDS).toFixed(2)}x
                               </span>
                             </div>
 
@@ -1040,37 +1174,57 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
               </div>
 
               {/* YES & NO Odds Multipliers */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-emerald-400 font-semibold block">
-                    YES Odds Multiplier *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="1.01"
-                    max="50"
-                    required
-                    value={yesOdds}
-                    onChange={e => setYesOdds(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
-                  />
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-slate-400">
+                    Fixed Default: <strong className="text-emerald-400">YES 1.80x</strong> ·{' '}
+                    <strong className="text-rose-400">NO 3.20x</strong> (Admin can customize)
+                  </span>
+                  {(Number(yesOdds) !== DEFAULT_YES_ODDS || Number(noOdds) !== DEFAULT_NO_ODDS) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setYesOdds(DEFAULT_YES_ODDS);
+                        setNoOdds(DEFAULT_NO_ODDS);
+                      }}
+                      className="text-[11px] font-semibold text-[#14e071] hover:underline cursor-pointer"
+                    >
+                      Reset 1.80 / 3.20
+                    </button>
+                  )}
                 </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-emerald-400 font-semibold block">
+                      YES Odds Multiplier *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="1.01"
+                      max="50"
+                      required
+                      value={yesOdds}
+                      onChange={e => setYesOdds(Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
+                    />
+                  </div>
 
-                <div className="space-y-1">
-                  <label className="text-rose-400 font-semibold block">
-                    NO Odds Multiplier *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="1.01"
-                    max="50"
-                    required
-                    value={noOdds}
-                    onChange={e => setNoOdds(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-rose-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
-                  />
+                  <div className="space-y-1">
+                    <label className="text-rose-400 font-semibold block">
+                      NO Odds Multiplier *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="1.01"
+                      max="50"
+                      required
+                      value={noOdds}
+                      onChange={e => setNoOdds(Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-rose-500 rounded-xl px-3 py-2 text-white font-mono font-bold outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1231,32 +1385,49 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-emerald-400 font-semibold block mb-1">YES Odds:</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="1.01"
-                    max="50"
-                    required
-                    value={yesOdds}
-                    onChange={e => setYesOdds(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono outline-none"
-                  />
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400">Odds Multipliers</span>
+                  {(Number(yesOdds) !== DEFAULT_YES_ODDS || Number(noOdds) !== DEFAULT_NO_ODDS) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setYesOdds(DEFAULT_YES_ODDS);
+                        setNoOdds(DEFAULT_NO_ODDS);
+                      }}
+                      className="text-[11px] font-semibold text-[#14e071] hover:underline cursor-pointer"
+                    >
+                      Reset Default (1.80 / 3.20)
+                    </button>
+                  )}
                 </div>
-                <div>
-                  <label className="text-rose-400 font-semibold block mb-1">NO Odds:</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="1.01"
-                    max="50"
-                    required
-                    value={noOdds}
-                    onChange={e => setNoOdds(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 focus:border-rose-500 rounded-xl px-3 py-2 text-white font-mono outline-none"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-emerald-400 font-semibold block mb-1">YES Odds:</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="1.01"
+                      max="50"
+                      required
+                      value={yesOdds}
+                      onChange={e => setYesOdds(Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-rose-400 font-semibold block mb-1">NO Odds:</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="1.01"
+                      max="50"
+                      required
+                      value={noOdds}
+                      onChange={e => setNoOdds(Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-rose-500 rounded-xl px-3 py-2 text-white font-mono outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 
