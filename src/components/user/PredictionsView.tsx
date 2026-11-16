@@ -466,30 +466,6 @@ export const PredictionsView: React.FC<PredictionsViewProps> = ({
                       )}
                     </div>
                   )}
-
-                  {/* Volume bar */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[10px] text-slate-500 font-mono-numbers">
-                      <span>YES: {pred.totalYesVolume.toLocaleString()}</span>
-                      <span>NO: {pred.totalNoVolume.toLocaleString()}</span>
-                    </div>
-                    {pred.totalYesVolume + pred.totalNoVolume > 0 && (
-                      <div className="h-1.5 w-full bg-white/[0.06] rounded-full overflow-hidden flex">
-                        <div
-                          className="bg-[#14e071] h-full transition-all"
-                          style={{
-                            width: `${(pred.totalYesVolume / (pred.totalYesVolume + pred.totalNoVolume)) * 100}%`
-                          }}
-                        />
-                        <div
-                          className="bg-rose-500 h-full transition-all"
-                          style={{
-                            width: `${(pred.totalNoVolume / (pred.totalYesVolume + pred.totalNoVolume)) * 100}%`
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
                 </div>
               </motion.div>
             );
