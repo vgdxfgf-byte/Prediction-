@@ -1297,9 +1297,10 @@ async function startServer() {
   app.get('/api/cricket/matches', async (req, res) => {
     try {
       const force = req.query.refresh === '1';
-      const { matches, fetchedAt } = await fetchLiveCricketMatches(force);
+      const { matches, fetchedAt } = await fetchLiveCricketMatches(force, force);
       const liveCount = matches.filter(m => m.status === 'in').length;
-      res.json({ success: true, matches, fetchedAt, liveCount });
+      const upcomingCount = matches.filter(m => m.status === 'pre').length;
+      res.json({ success: true, matches, fetchedAt, liveCount, upcomingCount });
     } catch (err) {
       res.status(502).json({
         success: false,

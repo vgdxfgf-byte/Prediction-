@@ -6,11 +6,12 @@ export interface CricketStreamCallbacks {
   onConnectionChange?: (connected: boolean) => void;
 }
 
-export async function fetchCricketMatchesRest(): Promise<{
+export async function fetchCricketMatchesRest(forceRefresh = false): Promise<{
   matches: LiveCricketMatch[];
   fetchedAt: string;
 }> {
-  const res = await fetch('/api/cricket/matches');
+  const qs = forceRefresh ? '?refresh=1' : '';
+  const res = await fetch(`/api/cricket/matches${qs}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch live cricket matches (${res.status})`);
   }
@@ -31,10 +32,12 @@ export async function fetchCricketMatchesRest(): Promise<{
 
 export async function fetchCricketMatchDetailRest(
   leagueId: string,
-  eventId: string
+  eventId: string,
+  forceRefresh = false
 ): Promise<LiveCricketDetail> {
+  const qs = forceRefresh ? '?refresh=1' : '';
   const res = await fetch(
-    `/api/cricket/match/${encodeURIComponent(leagueId)}/${encodeURIComponent(eventId)}`
+    `/api/cricket/match/${encodeURIComponent(leagueId)}/${encodeURIComponent(eventId)}${qs}`
   );
   if (!res.ok) {
     throw new Error(`Failed to fetch match scorecard (${res.status})`);

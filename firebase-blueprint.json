@@ -110,6 +110,8 @@
         "houseMargin": { "type": "number" },
         "yesProbability": { "type": "number" },
         "lastOddsSyncAt": { "type": "string", "maxLength": 64 },
+        "autoSettleMode": { "type": "string", "enum": ["manual", "live_cricket", "scheduled"] },
+        "autoSettleOutcome": { "type": "string", "enum": ["YES", "NO", "VOID"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

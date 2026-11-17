@@ -101,13 +101,14 @@ interface DetailCacheEntry {
 
 let matchesCache: MatchesCacheEntry | null = null;
 let upcomingCache: UpcomingCacheEntry | null = null;
+let upcomingInFlight: Promise<LiveCricketMatch[]> | null = null;
 const detailCache = new Map<string, DetailCacheEntry>();
 
 function formatEspnDateParam(date: Date): string {
   return date.toISOString().slice(0, 10).replace(/-/g, '');
 }
 
-async function fetchJsonWithTimeout(url: string, timeoutMs = 8000): Promise<unknown> {
+async function fetchJsonWithTimeout(url: string, timeoutMs = 8500): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -221,52 +222,69 @@ function normalizeScoreboardEvent(ev: RawEspnEvent, league: RawEspnLeague): Live
 
 async function fetchUpcomingScheduleMatches(forceRefresh = false): Promise<LiveCricketMatch[]> {
   const now = Date.now();
-  if (!forceRefresh && upcomingCache && now < upcomingCache.expiresAt) {
+  if (!forceRefresh && upcomingCache && upcomingCache.matches.length > 0 && now < upcomingCache.expiresAt) {
     return upcomingCache.matches;
   }
 
-  const dayUrls: string[] = [];
-  for (let offset = 1; offset <= UPCOMING_DAYS_AHEAD; offset++) {
-    const dt = new Date(now + offset * 86400000);
-    dayUrls.push(`${ESPN_SCOREBOARD_URL}&dates=${formatEspnDateParam(dt)}`);
+  if (upcomingInFlight) {
+    return upcomingInFlight;
   }
 
-  const results = await Promise.allSettled(
-    dayUrls.map(url => fetchJsonWithTimeout(url, 6500))
-  );
-
-  const collected: LiveCricketMatch[] = [];
-  const seen = new Set<string>();
-  let anySucceeded = false;
-
-  for (const res of results) {
-    if (res.status !== 'fulfilled') continue;
-    anySucceeded = true;
-    const payload = res.value as { sports?: Array<{ leagues?: RawEspnLeague[] }> };
-    const leagues = payload?.sports?.[0]?.leagues || [];
-    for (const league of leagues) {
-      for (const ev of league.events || []) {
-        const id = String(ev.id || '');
-        if (!id || seen.has(id)) continue;
-        const normalized = normalizeScoreboardEvent(ev, league);
-        if (normalized.status === 'post') continue;
-        seen.add(id);
-        collected.push(normalized);
+  upcomingInFlight = (async () => {
+    try {
+      const dayUrls: string[] = [];
+      for (let offset = 0; offset <= UPCOMING_DAYS_AHEAD; offset++) {
+        const dt = new Date(Date.now() + offset * 86400000);
+        dayUrls.push(`${ESPN_SCOREBOARD_URL}&dates=${formatEspnDateParam(dt)}`);
       }
+
+      // Fetch in two gentle batches so ESPN doesn't rate-limit concurrent requests
+      const mid = Math.ceil(dayUrls.length / 2);
+      const batch1 = await Promise.allSettled(dayUrls.slice(0, mid).map(url => fetchJsonWithTimeout(url, 8500)));
+      const batch2 = await Promise.allSettled(dayUrls.slice(mid).map(url => fetchJsonWithTimeout(url, 8500)));
+      const results = [...batch1, ...batch2];
+
+      const collected: LiveCricketMatch[] = [];
+      const seen = new Set<string>();
+      let anySucceeded = false;
+
+      for (const res of results) {
+        if (res.status !== 'fulfilled') continue;
+        anySucceeded = true;
+        const payload = res.value as { sports?: Array<{ leagues?: RawEspnLeague[] }> };
+        const leagues = payload?.sports?.[0]?.leagues || [];
+        for (const league of leagues) {
+          for (const ev of league.events || []) {
+            const id = String(ev.id || '');
+            if (!id || seen.has(id)) continue;
+            const normalized = normalizeScoreboardEvent(ev, league);
+            if (normalized.status === 'post') continue;
+            seen.add(id);
+            collected.push(normalized);
+          }
+        }
+      }
+
+      if (anySucceeded && (collected.length > 0 || !upcomingCache || upcomingCache.matches.length === 0)) {
+        upcomingCache = {
+          matches: collected,
+          expiresAt: Date.now() + UPCOMING_CACHE_TTL_MS
+        };
+      }
+
+      return upcomingCache?.matches || collected;
+    } finally {
+      upcomingInFlight = null;
     }
-  }
+  })();
 
-  if (anySucceeded) {
-    upcomingCache = {
-      matches: collected,
-      expiresAt: now + UPCOMING_CACHE_TTL_MS
-    };
-  }
-
-  return upcomingCache?.matches || collected;
+  return upcomingInFlight;
 }
 
-export async function fetchLiveCricketMatches(forceRefresh = false): Promise<{
+export async function fetchLiveCricketMatches(
+  forceRefresh = false,
+  forceUpcomingRefresh = false
+): Promise<{
   matches: LiveCricketMatch[];
   fetchedAt: string;
 }> {
@@ -275,11 +293,15 @@ export async function fetchLiveCricketMatches(forceRefresh = false): Promise<{
     return { matches: matchesCache.matches, fetchedAt: matchesCache.fetchedAt };
   }
 
+  const shouldForceUpcoming =
+    forceUpcomingRefresh &&
+    (!upcomingCache || upcomingCache.matches.length === 0 || now >= upcomingCache.expiresAt - (UPCOMING_CACHE_TTL_MS - 15000));
+
   const [todayData, upcomingSchedule] = await Promise.all([
     fetchJsonWithTimeout(ESPN_SCOREBOARD_URL) as Promise<{
       sports?: Array<{ leagues?: RawEspnLeague[] }>;
     }>,
-    fetchUpcomingScheduleMatches(forceRefresh).catch(() => upcomingCache?.matches || [])
+    fetchUpcomingScheduleMatches(shouldForceUpcoming).catch(() => upcomingCache?.matches || [])
   ]);
 
   const leagues = todayData?.sports?.[0]?.leagues || [];

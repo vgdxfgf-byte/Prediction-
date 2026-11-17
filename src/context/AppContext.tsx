@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { onAuthStateChanged, type ConfirmationResult, type User as FirebaseAuthUser } from 'firebase/auth';
 import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { isMarketBettingOpen } from '../utils/marketTiming';
 import {
   BOOTSTRAPPED_ADMIN_EMAIL,
   checkIsFirebaseAdmin,
@@ -54,6 +53,7 @@ import {
   fetchCricketMatchesRest,
   fetchCricketMatchDetailRest
 } from '../services/cricketLiveClient';
+import { isMarketBettingOpen } from '../utils/marketTiming';
 import {
   User,
   Prediction,
@@ -193,7 +193,7 @@ interface AppContextType {
   cricketError: string | null;
   activeCricketDetail: LiveCricketDetail | null;
   cricketDetailLoading: boolean;
-  refreshCricketMatches: () => Promise<void>;
+  refreshCricketMatches: (forceRefresh?: boolean) => Promise<void>;
   selectCricketMatchForDetail: (match: LiveCricketMatch | null) => Promise<void>;
 
   // Bet Builder (Multi-Prediction Combo)
@@ -421,14 +421,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   // Real-time Cricket Match WebSocket + Initial REST hydration
-  const refreshCricketMatches = useCallback(async () => {
+  const refreshCricketMatches = useCallback(async (forceRefresh = false) => {
     setCricketLoading(true);
     try {
-      const { matches, fetchedAt } = await fetchCricketMatchesRest();
+      const { matches, fetchedAt } = await fetchCricketMatchesRest(forceRefresh);
       setLiveCricketMatches(matches);
       setLiveCricketFetchedAt(fetchedAt);
       setCricketError(null);
-      cricketClientRef.current?.requestRefresh();
+      if (forceRefresh) {
+        cricketClientRef.current?.requestRefresh();
+      }
     } catch (err) {
       setCricketError(err instanceof Error ? err.message : 'Unable to load live cricket feed');
     } finally {

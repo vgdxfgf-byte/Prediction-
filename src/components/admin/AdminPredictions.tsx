@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   Prediction,
@@ -66,6 +66,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     liveCricketMatches,
     cricketStreamConnected,
     cricketLoading,
+    cricketError,
     activeCricketDetail,
     cricketDetailLoading,
     refreshCricketMatches,
@@ -74,7 +75,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | PredictionStatus>('all');
-  const [liveMatchFilter, setLiveMatchFilter] = useState<'in' | 'pre' | 'all'>('in');
+  const [liveMatchFilter, setLiveMatchFilter] = useState<'in' | 'pre' | 'all'>('all');
   const [liveFormatFilter, setLiveFormatFilter] = useState<'all' | 'T20' | 'ODI' | 'Test'>('all');
   const [liveMatchSearch, setLiveMatchSearch] = useState('');
   const [quickPublishingId, setQuickPublishingId] = useState<string | null>(null);
@@ -136,14 +137,31 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
 
   const liveRunningMatches = liveCricketMatches.filter(m => m.status === 'in');
   const upcomingCricketMatches = liveCricketMatches.filter(m => m.status === 'pre');
+  const liveAndUpcomingMatches = liveCricketMatches.filter(m => m.status === 'in' || m.status === 'pre');
+
+  const matchesFormatFilter = (formatStr: string): boolean => {
+    if (liveFormatFilter === 'all') return true;
+    const f = (formatStr || '').toLowerCase();
+    if (liveFormatFilter === 'T20') {
+      return f.includes('t20') || f.includes('twenty20') || f.includes('t10') || f.includes('hundred');
+    }
+    if (liveFormatFilter === 'ODI') {
+      return f.includes('odi') || f.includes('one day') || f.includes('list a') || f.includes('other od') || f.includes('50');
+    }
+    if (liveFormatFilter === 'Test') {
+      return f.includes('test') || f.includes('first-class') || f.includes('shield') || f.includes('4-day') || f.includes('county');
+    }
+    return true;
+  };
+
   const modalCricketMatches = (
     liveMatchFilter === 'in'
       ? liveRunningMatches
       : liveMatchFilter === 'pre'
         ? upcomingCricketMatches
-        : liveCricketMatches
+        : liveAndUpcomingMatches
   ).filter(m => {
-    if (liveFormatFilter !== 'all' && !m.format.toLowerCase().includes(liveFormatFilter.toLowerCase())) {
+    if (!matchesFormatFilter(m.format)) {
       return false;
     }
     if (!liveMatchSearch.trim()) return true;
@@ -164,6 +182,16 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       )
     : null;
 
+  useEffect(() => {
+    if (initialCreateOpen) {
+      setShowCreateModal(true);
+      setLiveMatchFilter('all');
+      setLiveFormatFilter('all');
+      setLiveMatchSearch('');
+      void refreshCricketMatches(false);
+    }
+  }, [initialCreateOpen, refreshCricketMatches]);
+
   const handleOpenCreate = (initialFilter?: 'in' | 'pre' | 'all') => {
     setTitle('');
     setSubtitle('');
@@ -180,12 +208,12 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setCreateNotice(null);
     setLiveMatchSearch('');
     setLiveFormatFilter('all');
-    setLiveMatchFilter(initialFilter ?? (liveRunningMatches.length > 0 ? 'in' : 'pre'));
-    void refreshCricketMatches();
+    setLiveMatchFilter(initialFilter ?? 'all');
+    void refreshCricketMatches(false);
     setShowCreateModal(true);
   };
 
-  const handleSelectCricketMatch = (matchId: string) => {
+  const handleSelectCricketMatch = (matchId: string, preserveText = false) => {
     setCricketMatchId(matchId);
     setCreateNotice(null);
     if (!matchId) {
@@ -198,6 +226,9 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
       setCricketLeagueId(found.leagueId);
       setCategory('Cricket');
       void selectCricketMatchForDetail(found);
+      if (preserveText) {
+        return;
+      }
       const analysis = buildLiveCricketSessionAnalysis(found);
       const firstSuggestion = analysis.suggestions[0];
       if (firstSuggestion) {
@@ -225,7 +256,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setDescription(s.description);
     setFormError('');
     setCreateNotice(
-      `Loaded "${s.label}" with YES ${Number(yesOdds || DEFAULT_YES_ODDS).toFixed(2)}x / NO ${Number(noOdds || DEFAULT_NO_ODDS).toFixed(2)}x (editable below).`
+      `Loaded "${s.label}" with YES ${Number(yesOdds || DEFAULT_YES_ODDS).toFixed(2)}x / NO ${Number(noOdds || DEFAULT_NO_ODDS).toFixed(2)}x.`
     );
   };
 
@@ -256,7 +287,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
     setQuickPublishingId(null);
     if (res.success) {
       setCreateNotice(
-        `Published "${s.label}" live for users (${activeYes.toFixed(2)}x YES / ${activeNo.toFixed(2)}x NO).`
+        `Published "${s.label}" live (${activeYes.toFixed(2)}x YES / ${activeNo.toFixed(2)}x NO).`
       );
     } else {
       setFormError(res.error || 'Failed to publish live prediction');
@@ -835,7 +866,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                   Create New Prediction Market
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Pick any live running cricket match to see real-time Match Winner &amp; Session odds, or build a custom market.
+                  Pick any live or upcoming cricket match to see real-time Match Winner &amp; Session odds, or build a custom market.
                 </p>
               </div>
               <button
@@ -852,12 +883,12 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
             </div>
 
             <form onSubmit={handleCreateSubmit} className="p-5 overflow-y-auto space-y-5 text-xs">
-              {/* Live Running Cricket Matches & Session Odds Panel */}
+              {/* Live & Upcoming Cricket Matches & Session Odds Panel */}
               <div className="rounded-2xl bg-slate-950/90 border border-slate-800 p-4 space-y-3.5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Radio className="w-4 h-4 text-[#14e071]" />
-                    <span className="font-bold text-sm text-white">Live Running Matches &amp; Session Odds</span>
+                    <span className="font-bold text-sm text-white">Live &amp; Upcoming Matches &amp; Session Odds</span>
                     <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
                       <span
                         className={`w-1.5 h-1.5 rounded-full ${
@@ -871,9 +902,9 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                   <div className="flex flex-wrap items-center gap-1.5">
                     <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px]">
                       {[
+                        { id: 'all' as const, label: `All (${liveAndUpcomingMatches.length})` },
                         { id: 'in' as const, label: `Live (${liveRunningMatches.length})` },
-                        { id: 'pre' as const, label: `Upcoming (${upcomingCricketMatches.length})` },
-                        { id: 'all' as const, label: `All (${liveCricketMatches.length})` }
+                        { id: 'pre' as const, label: `Upcoming (${upcomingCricketMatches.length})` }
                       ].map(tab => (
                         <button
                           key={tab.id}
@@ -892,7 +923,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => void refreshCricketMatches()}
+                      onClick={() => void refreshCricketMatches(true)}
                       className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 flex items-center gap-1 text-[11px] font-semibold whitespace-nowrap cursor-pointer"
                     >
                       <RefreshCw className={`w-3 h-3 ${cricketLoading ? 'animate-spin' : ''}`} />
@@ -900,6 +931,22 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {cricketError && (
+                  <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-center justify-between gap-2 text-[11px]">
+                    <span className="flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      {cricketError}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void refreshCricketMatches(true)}
+                      className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-semibold shrink-0 cursor-pointer"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
 
                 {/* Search & Format Filter */}
                 <div className="flex flex-col sm:flex-row gap-2">
@@ -1365,17 +1412,22 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                 </div>
               </div>
 
-              {liveCricketMatches.length > 0 && (
+              {(liveCricketMatches.length > 0 || cricketMatchId) && (
                 <div>
                   <label className="text-emerald-400 font-semibold block mb-1">
                     Link to Live Cricket Match (Optional):
                   </label>
                   <select
                     value={cricketMatchId}
-                    onChange={e => handleSelectCricketMatch(e.target.value)}
+                    onChange={e => handleSelectCricketMatch(e.target.value, true)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none"
                   >
                     <option value="">— No live match link —</option>
+                    {cricketMatchId && !liveCricketMatches.some(m => m.id === cricketMatchId) && (
+                      <option value={cricketMatchId}>
+                        [LINKED] {editPred.subtitle || cricketMatchId}
+                      </option>
+                    )}
                     {liveCricketMatches.map(m => (
                       <option key={m.id} value={m.id}>
                         [{m.status === 'in' ? 'LIVE' : m.status === 'pre' ? 'UPCOMING' : 'DONE'}] {m.shortName} · {m.leagueName}
@@ -1503,7 +1555,7 @@ export const AdminPredictions: React.FC<AdminPredictionsProps> = ({
                   className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-3 py-2 text-white outline-none"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Betting automatically pauses once this date & time is reached.
+                  Betting automatically pauses once this date &amp; time is reached.
                 </p>
               </div>
 

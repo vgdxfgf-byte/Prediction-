@@ -2849,9 +2849,36 @@ export async function fsSettlePrediction(
   adminUsername: string,
   bets: Bet[],
   users: User[]
-): Promise<{ success: boolean; error?: string; winnersCount: number; totalPayout: number }> {
+): Promise<{ success: boolean; error?: string; winnersCount: number; totalPayout: number; alreadySettled?: boolean }> {
+  // Guard against double-settlement by checking latest prediction state in Firestore
+  try {
+    const predSnap = await getDoc(doc(db, 'predictions', predictionId));
+    if (!predSnap.exists()) {
+      return { success: false, error: 'Prediction not found', winnersCount: 0, totalPayout: 0 };
+    }
+    if (predSnap.data()?.status === 'settled') {
+      return { success: true, winnersCount: 0, totalPayout: 0, alreadySettled: true };
+    }
+  } catch {
+    // Proceed with local state guard if transient read issue
+  }
+
   const nowIso = new Date().toISOString();
-  const pendingBets = bets.filter(b => b.predictionId === predictionId && b.result === 'pending');
+  let pendingBets: Bet[] = bets.filter(b => b.predictionId === predictionId && b.result === 'pending');
+  try {
+    const freshBetsSnap = await getDocs(
+      query(
+        collection(db, 'bets'),
+        where('predictionId', '==', predictionId),
+        where('result', '==', 'pending')
+      )
+    );
+    pendingBets = freshBetsSnap.docs.map(d => mapBetDoc(d.id, d.data()));
+  } catch {
+    // Fall back to passed-in bets snapshot
+  }
+
+  const origUserCoins = new Map<string, number>(users.map(u => [u.id, u.coins]));
   const userCoins = new Map<string, number>(users.map(u => [u.id, u.coins]));
   const userOwnerUids = new Map<string, string>();
   for (const u of users) {
@@ -2859,6 +2886,40 @@ export async function fsSettlePrediction(
   }
   for (const b of pendingBets) {
     if (b.ownerUid && !userOwnerUids.has(b.userId)) userOwnerUids.set(b.userId, b.ownerUid);
+  }
+
+  // Refresh affected users from Firestore so sequential auto-settlements never overwrite stale coin balances
+  const affectedUserIds = new Set<string>(pendingBets.map(b => b.userId));
+  try {
+    const pendingParlaysSnap = await getDocs(query(collection(db, 'parlay_bets'), where('result', '==', 'pending')));
+    for (const pDoc of pendingParlaysSnap.docs) {
+      const pData = mapParlayBetDoc(pDoc.id, pDoc.data());
+      if (pData.legs.some(l => l.predictionId === predictionId && l.status === 'pending')) {
+        affectedUserIds.add(pData.userId);
+        if (pData.ownerUid && !userOwnerUids.has(pData.userId)) {
+          userOwnerUids.set(pData.userId, pData.ownerUid);
+        }
+      }
+    }
+  } catch {
+    // Parlay refresh handled inside applyMarketResolutionToParlays
+  }
+
+  for (const uid of affectedUserIds) {
+    try {
+      const uSnap = await getDoc(doc(db, 'users', uid));
+      if (uSnap.exists()) {
+        const uData = uSnap.data();
+        const latestCoins = Number(uData.coins ?? 0);
+        origUserCoins.set(uid, latestCoins);
+        userCoins.set(uid, latestCoins);
+        if (typeof uData.ownerUid === 'string' && uData.ownerUid) {
+          userOwnerUids.set(uid, uData.ownerUid);
+        }
+      }
+    } catch {
+      // Keep fallback coins
+    }
   }
 
   let winnersCount = 0;
@@ -2984,8 +3045,8 @@ export async function fsSettlePrediction(
   totalPayout += parlayRes.parlayPayout;
 
   for (const [uid, nextCoins] of userCoins.entries()) {
-    const orig = users.find(u => u.id === uid);
-    if (orig && orig.coins !== nextCoins) {
+    const prevCoins = origUserCoins.get(uid);
+    if (prevCoins !== undefined && prevCoins !== nextCoins) {
       ops.push({
         kind: 'update',
         ref: doc(db, 'users', uid),
